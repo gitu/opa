@@ -186,6 +186,43 @@ func TestOCIPublicRegistryAuth(t *testing.T) {
 	}
 }
 
+// TestOCITokenAuth
+func TestOCITokenAuth(t *testing.T) {
+	ctx := context.Background()
+	fixture := newTestFixture(t, withGitlabRegistryAuth())
+	plainToken := "secret"
+	token := base64.StdEncoding.EncodeToString([]byte(plainToken)) // token should be base64 encoded
+	fixture.server.expAuth = fmt.Sprintf("Bearer %s", token)       // test on private repository
+	fixture.server.expEtag = "sha256:c5834dbce332cabe6ae68a364de171a50bf5b08024c27d7c08cc72878b4df7ff"
+
+	restConf := fmt.Sprintf(`{
+		"url": %q,
+		"type": "oci",
+		"credentials": {
+			"bearer": {
+				"token": %q
+			}
+		}
+	}`, fixture.server.server.URL, plainToken)
+
+	client, err := rest.New([]byte(restConf), map[string]*keys.Config{})
+	if err != nil {
+		t.Fatalf("failed to create rest client: %s", err)
+	}
+	fixture.setClient(client)
+
+	config := Config{}
+	if err := config.ValidateAndInjectDefaults(); err != nil {
+		t.Fatal(err)
+	}
+
+	d := NewOCI(Config{}, fixture.client, "ghcr.io/org/repo:latest", t.TempDir())
+
+	if err := d.oneShot(ctx); err != nil {
+		t.Fatalf("Unexpected error: %s", err)
+	}
+}
+
 func TestOCICustomAuthPlugin(t *testing.T) {
 	fixture := newTestFixture(t)
 	defer fixture.server.stop()

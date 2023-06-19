@@ -330,12 +330,23 @@ func dockerResolver(plugin rest.HTTPAuthPlugin, config *rest.Config, logger logg
 		return nil, fmt.Errorf("failed to parse url: %w", err)
 	}
 
+	dockerAuthorizerOpts := []docker.AuthorizerOpt{
+		docker.WithAuthClient(client),
+	}
+
+	// for token flow containerd ignores the client's headers thus we add it manually here if it's set in the config
+	if authHeaderPlugin, isHeaderAuthPlugin := plugin.(rest.HTTPHeaderAuthPlugin); isHeaderAuthPlugin {
+		header, err := authHeaderPlugin.AuthHeader()
+		if err != nil {
+			return nil, fmt.Errorf("failed to create auth header: %w", err)
+		}
+		dockerAuthorizerOpts = append(dockerAuthorizerOpts, docker.WithAuthHeader(header))
+	}
+
 	authorizer := pluginAuthorizer{
-		plugin: plugin,
-		authorizer: docker.NewDockerAuthorizer(
-			docker.WithAuthClient(client),
-		),
-		logger: logger,
+		plugin:     plugin,
+		authorizer: docker.NewDockerAuthorizer(dockerAuthorizerOpts...),
+		logger:     logger,
 	}
 
 	registryHost := docker.RegistryHost{

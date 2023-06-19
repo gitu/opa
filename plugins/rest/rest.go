@@ -39,6 +39,10 @@ type HTTPAuthPlugin interface {
 	Prepare(*http.Request) error
 }
 
+type HTTPHeaderAuthPlugin interface {
+	AuthHeader() (http.Header, error)
+}
+
 // Config represents configuration for a REST client.
 type Config struct {
 	Name                         string            `json:"name"`

@@ -145,12 +145,33 @@ func (ap *bearerAuthPlugin) NewClient(c Config) (*http.Client, error) {
 }
 
 func (ap *bearerAuthPlugin) Prepare(req *http.Request) error {
+	token, err := ap.buildToken()
+	if err != nil {
+		return err
+	}
+
+	req.Header.Add("Authorization", fmt.Sprintf("%v %v", ap.Scheme, token))
+	return nil
+}
+
+func (ap *bearerAuthPlugin) AuthHeader() (http.Header, error) {
+	token, err := ap.buildToken()
+	if err != nil {
+		return nil, err
+	}
+
+	header := make(http.Header)
+	header.Add("Authorization", fmt.Sprintf("%v %v", ap.Scheme, token))
+	return header, err
+}
+
+func (ap *bearerAuthPlugin) buildToken() (string, error) {
 	token := ap.Token
 
 	if ap.TokenPath != "" {
 		bytes, err := os.ReadFile(ap.TokenPath)
 		if err != nil {
-			return err
+			return "", err
 		}
 		token = strings.TrimSpace(string(bytes))
 	}
@@ -158,9 +179,7 @@ func (ap *bearerAuthPlugin) Prepare(req *http.Request) error {
 	if ap.encode {
 		token = base64.StdEncoding.EncodeToString([]byte(token))
 	}
-
-	req.Header.Add("Authorization", fmt.Sprintf("%v %v", ap.Scheme, token))
-	return nil
+	return token, nil
 }
 
 type tokenEndpointResponse struct {

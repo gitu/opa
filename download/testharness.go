@@ -141,6 +141,100 @@ func tokenHandler(token string) http.HandlerFunc {
 	}
 }
 
+// withGitlabRegistryAuth sets up a token auth flow according to
+// the spec https://docs.docker.com/registry/spec/auth/token/.
+//
+// The flow is the same as for public registries but additionally
+// the request for fetching the token also has to be authenticated.
+//
+// The token issuing and validation differs between providers
+// and we only use a minimal version for testing.
+func withGitlabRegistryAuth() fixtureOpt {
+	const token = "some-test-token"
+	tokenServer := httptest.NewServer(tokenHandlerAuth("c2VjcmV0", token))
+
+	const wwwAuthenticateFmt = "Bearer realm=%q service=%q scope=%q"
+	tokenServiceURL := tokenServer.URL + "/token"
+	wwwAuthenticate := fmt.Sprintf(wwwAuthenticateFmt,
+		tokenServiceURL,
+		"testRegistry.io",
+		"[pull]")
+
+	return func(tf *testFixture) error {
+		tf.server.customAuth = func(w http.ResponseWriter, r *http.Request) error {
+
+			authHeader := r.Header.Get("Authorization")
+
+			println(r.URL.String() + " -- " + r.Header.Get("Authorization"))
+			if authHeader == "" {
+				w.Header().Set("WWW-Authenticate", wwwAuthenticate)
+				return fmt.Errorf("no authorization header: %w", errUnauthorized)
+			}
+
+			if !strings.HasPrefix(authHeader, "Bearer ") {
+				w.Header().Set("WWW-Authenticate", wwwAuthenticate)
+				return fmt.Errorf("expects bearer scheme: %w", errUnauthorized)
+			}
+
+			bearerToken := strings.TrimPrefix(authHeader, "Bearer ")
+			if bearerToken != token {
+				w.Header().Set("WWW-Authenticate", wwwAuthenticate)
+				return fmt.Errorf("token %q doesn't match %q: %w", bearerToken, token, errUnauthorized)
+			}
+
+			return nil
+		}
+
+		return nil
+	}
+}
+
+// tokenHandler returns an http.Handler that responds with the
+// specified token to GET /token requests.
+func tokenHandlerAuth(expectedToken, issuedToken string) http.HandlerFunc {
+	tokenResponse := struct {
+		Token string `json:"token"`
+	}{
+		Token: issuedToken,
+	}
+
+	responseBody, err := json.Marshal(tokenResponse)
+	if err != nil {
+		panic("failed to marshal token response: " + err.Error())
+	}
+
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "GET" {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+
+		if r.URL.Path != "/token" {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+
+		authHeader := r.Header.Get("Authorization")
+		if authHeader == "" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+
+		if !strings.HasPrefix(authHeader, "Bearer ") {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+
+		bearerToken := strings.TrimPrefix(authHeader, "Bearer ")
+		if bearerToken != expectedToken {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+
+		w.Write(responseBody)
+	}
+}
+
 func (t *testFixture) setClient(client rest.Client) {
 	t.client = client
 }

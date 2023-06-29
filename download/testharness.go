@@ -165,7 +165,6 @@ func withGitlabRegistryAuth() fixtureOpt {
 
 			authHeader := r.Header.Get("Authorization")
 
-			println(r.URL.String() + " -- " + r.Header.Get("Authorization"))
 			if authHeader == "" {
 				w.Header().Set("WWW-Authenticate", wwwAuthenticate)
 				return fmt.Errorf("no authorization header: %w", errUnauthorized)

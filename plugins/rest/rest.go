@@ -39,12 +39,6 @@ type HTTPAuthPlugin interface {
 	Prepare(*http.Request) error
 }
 
-// HTTPHeaderAuthPlugin represents a mechanism to provide a header for HTTP authentication for a REST service
-type HTTPHeaderAuthPlugin interface {
-	// AuthHeader returns the header to be used for authentication
-	AuthHeader() (http.Header, error)
-}
-
 // Config represents configuration for a REST client.
 type Config struct {
 	Name                         string            `json:"name"`

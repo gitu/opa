@@ -112,44 +112,16 @@ func withPublicRegistryAuth() fixtureOpt {
 	}
 }
 
-// tokenHandler returns an http.Handler that responds with the
-// specified token to GET /token requests.
-func tokenHandler(token string) http.HandlerFunc {
-	tokenResponse := struct {
-		Token string `json:"token"`
-	}{
-		Token: token,
-	}
-
-	responseBody, err := json.Marshal(tokenResponse)
-	if err != nil {
-		panic("failed to marshal token response: " + err.Error())
-	}
-
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != "GET" {
-			w.WriteHeader(http.StatusMethodNotAllowed)
-			return
-		}
-
-		if r.URL.Path != "/token" {
-			w.WriteHeader(http.StatusBadRequest)
-			return
-		}
-
-		w.Write(responseBody)
-	}
-}
-
-// withGitlabRegistryAuth sets up a token auth flow according to
+// withAuthenticatedTokenAuth sets up a token auth flow according to
 // the spec https://docs.docker.com/registry/spec/auth/token/.
 //
 // The flow is the same as for public registries but additionally
 // the request for fetching the token also has to be authenticated.
+// Used for example with gitlab registries.
 //
-// The token issuing and validation differs between providers
+// The token issuing and validation differs between providers,
 // and we only use a minimal version for testing.
-func withGitlabRegistryAuth() fixtureOpt {
+func withAuthenticatedTokenAuth() fixtureOpt {
 	const token = "some-test-token"
 	tokenServer := httptest.NewServer(tokenHandlerAuth("c2VjcmV0", token))
 
@@ -190,6 +162,15 @@ func withGitlabRegistryAuth() fixtureOpt {
 
 // tokenHandler returns an http.Handler that responds with the
 // specified token to GET /token requests.
+func tokenHandler(issuedToken string) http.HandlerFunc {
+	return tokenHandlerAuth("", issuedToken)
+}
+
+// tokenHandlerAuth returns an http.Handler that responds with the
+// specified token to GET /token requests.
+//
+// If expectedToken is not empty, the handler will check that the
+// Authorization header matches the expected token.
 func tokenHandlerAuth(expectedToken, issuedToken string) http.HandlerFunc {
 	tokenResponse := struct {
 		Token string `json:"token"`
@@ -213,6 +194,12 @@ func tokenHandlerAuth(expectedToken, issuedToken string) http.HandlerFunc {
 			return
 		}
 
+		// If no expected token is set, we don't check the Authorization header.
+		if expectedToken == "" {
+			_, _ = w.Write(responseBody)
+			return
+		}
+
 		authHeader := r.Header.Get("Authorization")
 		if authHeader == "" {
 			w.WriteHeader(http.StatusUnauthorized)
@@ -230,7 +217,7 @@ func tokenHandlerAuth(expectedToken, issuedToken string) http.HandlerFunc {
 			return
 		}
 
-		w.Write(responseBody)
+		_, _ = w.Write(responseBody)
 	}
 }
 

@@ -186,10 +186,12 @@ func TestOCIPublicRegistryAuth(t *testing.T) {
 	}
 }
 
-// TestOCITokenAuth
+// TestOCITokenAuth tests the registry `token` auth that is used for some registries (f.e. gitlab).
+// After the initial fetch the token has to be added to the request that fetches the temporary token.
+// This test verifies that the token is added to the second token request.
 func TestOCITokenAuth(t *testing.T) {
 	ctx := context.Background()
-	fixture := newTestFixture(t, withGitlabRegistryAuth())
+	fixture := newTestFixture(t, withAuthenticatedTokenAuth())
 	plainToken := "secret"
 	token := base64.StdEncoding.EncodeToString([]byte(plainToken)) // token should be base64 encoded
 	fixture.server.expAuth = fmt.Sprintf("Bearer %s", token)       // test on private repository

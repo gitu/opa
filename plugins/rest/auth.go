@@ -144,34 +144,30 @@ func (ap *bearerAuthPlugin) NewClient(c Config) (*http.Client, error) {
 	return DefaultRoundTripperClient(t, *c.ResponseHeaderTimeoutSeconds), nil
 }
 
+// Prepare adds the token to the request header. Implements the rest.HTTPAuthPlugin interface.
 func (ap *bearerAuthPlugin) Prepare(req *http.Request) error {
-	token, err := ap.buildToken()
-	if err != nil {
-		return err
-	}
-
-	req.Header.Add("Authorization", fmt.Sprintf("%v %v", ap.Scheme, token))
-	return nil
+	return ap.addAuthorizationHeader(req.Header)
 }
 
+// AuthHeader explicitly returns the header that would be added to the request with Prepare
+// this will be used by the OCIDownloader to sign the request to the OCI service for the
+// authenticated token flow. Implements the download.HTTPHeaderAuthPlugin interface.
 func (ap *bearerAuthPlugin) AuthHeader() (http.Header, error) {
-	token, err := ap.buildToken()
+	header := make(http.Header)
+	err := ap.addAuthorizationHeader(header)
 	if err != nil {
 		return nil, err
 	}
-
-	header := make(http.Header)
-	header.Add("Authorization", fmt.Sprintf("%v %v", ap.Scheme, token))
-	return header, err
+	return header, nil
 }
 
-func (ap *bearerAuthPlugin) buildToken() (string, error) {
+func (ap *bearerAuthPlugin) addAuthorizationHeader(header http.Header) error {
 	token := ap.Token
 
 	if ap.TokenPath != "" {
 		bytes, err := os.ReadFile(ap.TokenPath)
 		if err != nil {
-			return "", err
+			return err
 		}
 		token = strings.TrimSpace(string(bytes))
 	}
@@ -179,7 +175,9 @@ func (ap *bearerAuthPlugin) buildToken() (string, error) {
 	if ap.encode {
 		token = base64.StdEncoding.EncodeToString([]byte(token))
 	}
-	return token, nil
+
+	header.Add("Authorization", fmt.Sprintf("%v %v", ap.Scheme, token))
+	return nil
 }
 
 type tokenEndpointResponse struct {

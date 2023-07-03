@@ -151,7 +151,7 @@ func (ap *bearerAuthPlugin) Prepare(req *http.Request) error {
 
 // AuthHeader explicitly returns the header that would be added to the request with Prepare
 // this will be used by the OCIDownloader to sign the request to the OCI service for the
-// authenticated token flow. Implements the download.HTTPHeaderAuthPlugin interface.
+// authenticated token flow. Implements the download.httpHeaderAuthPlugin interface.
 func (ap *bearerAuthPlugin) AuthHeader() (http.Header, error) {
 	header := make(http.Header)
 	err := ap.addAuthorizationHeader(header)

@@ -330,23 +330,10 @@ func dockerResolver(plugin rest.HTTPAuthPlugin, config *rest.Config, logger logg
 		return nil, fmt.Errorf("failed to parse url: %w", err)
 	}
 
-	dockerAuthorizerOpts := []docker.AuthorizerOpt{
-		docker.WithAuthClient(client),
-	}
-
-	// for token flow containerd ignores the client's headers thus we add it manually here if it's set in the config
-	if authHeaderPlugin, isHeaderAuthPlugin := plugin.(httpHeaderAuthPlugin); isHeaderAuthPlugin {
-		header, err := authHeaderPlugin.AuthHeader()
-		if err != nil {
-			return nil, fmt.Errorf("failed to create auth header: %w", err)
-		}
-		dockerAuthorizerOpts = append(dockerAuthorizerOpts, docker.WithAuthHeader(header))
-	}
-
 	authorizer := pluginAuthorizer{
-		plugin:     plugin,
-		authorizer: docker.NewDockerAuthorizer(dockerAuthorizerOpts...),
-		logger:     logger,
+		plugin: plugin,
+		client: client,
+		logger: logger,
 	}
 
 	registryHost := docker.RegistryHost{
@@ -368,7 +355,11 @@ func dockerResolver(plugin rest.HTTPAuthPlugin, config *rest.Config, logger logg
 }
 
 type pluginAuthorizer struct {
-	plugin     rest.HTTPAuthPlugin
+	plugin rest.HTTPAuthPlugin
+	client *http.Client
+
+	// authorizer will be populated by the first call to pluginAuthorizer.Prepare
+	// since it requires a first pass through the plugin.Prepare method.
 	authorizer docker.Authorizer
 
 	logger logging.Logger
@@ -390,6 +381,25 @@ func (a *pluginAuthorizer) Authorize(ctx context.Context, req *http.Request) err
 		a.logger.Error(err.Error())
 
 		return err
+	}
+
+	if a.authorizer == nil {
+		// Some registry authentication implementations require a token fetch from
+		// a separate authenticated token server. This flow is described in the
+		// docker token auth spec:
+		// https://docs.docker.com/registry/spec/auth/token/#requesting-a-token
+		//
+		// Unfortunately, the containerd implementation does not use the Prepare
+		// mechanism to authenticate these token requests and we need to add
+		// auth information in form of a static docker.WithAuthHeader.
+		//
+		// Since rest.HTTPAuthPlugins will set the auth header on the request
+		// passed to HTTPAuthPlugin.Prepare, we can use it afterwards to build
+		// our docker.Authorizer.
+		a.authorizer = docker.NewDockerAuthorizer(
+			docker.WithAuthHeader(req.Header),
+			docker.WithAuthClient(a.client),
+		)
 	}
 
 	return a.authorizer.Authorize(ctx, req)
@@ -448,10 +458,4 @@ func (r *remoteManager) Exists(ctx context.Context, target ocispec.Descriptor) (
 	}
 
 	return !errdefs.IsNotFound(err), err
-}
-
-// httpHeaderAuthPlugin represents a mechanism to provide a header for authenticated token auth flow
-type httpHeaderAuthPlugin interface {
-	// AuthHeader returns the header to be used for authentication
-	AuthHeader() (http.Header, error)
 }

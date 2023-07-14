@@ -146,22 +146,6 @@ func (ap *bearerAuthPlugin) NewClient(c Config) (*http.Client, error) {
 
 // Prepare adds the token to the request header. Implements the rest.HTTPAuthPlugin interface.
 func (ap *bearerAuthPlugin) Prepare(req *http.Request) error {
-	return ap.addAuthorizationHeader(req.Header)
-}
-
-// AuthHeader explicitly returns the header that would be added to the request with Prepare
-// this will be used by the OCIDownloader to sign the request to the OCI service for the
-// authenticated token flow. Implements the download.httpHeaderAuthPlugin interface.
-func (ap *bearerAuthPlugin) AuthHeader() (http.Header, error) {
-	header := make(http.Header)
-	err := ap.addAuthorizationHeader(header)
-	if err != nil {
-		return nil, err
-	}
-	return header, nil
-}
-
-func (ap *bearerAuthPlugin) addAuthorizationHeader(header http.Header) error {
 	token := ap.Token
 
 	if ap.TokenPath != "" {
@@ -176,7 +160,8 @@ func (ap *bearerAuthPlugin) addAuthorizationHeader(header http.Header) error {
 		token = base64.StdEncoding.EncodeToString([]byte(token))
 	}
 
-	header.Add("Authorization", fmt.Sprintf("%v %v", ap.Scheme, token))
+	req.Header.Add("Authorization", fmt.Sprintf("%v %v", ap.Scheme, token))
+
 	return nil
 }
 

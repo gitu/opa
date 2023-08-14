@@ -148,7 +148,7 @@ func verifyJWTSignature(token string, bvc *VerificationConfig) (*DecodedSignatur
 	}
 
 	if ds.Scope != scope {
-		return nil, fmt.Errorf("scope mismatch got %s but expected %s", ds.Scope, scope)
+		return nil, fmt.Errorf("scope mismatch for key %s got %s but expected %s", keyID, ds.Scope, scope)
 	}
 	return &ds, nil
 }

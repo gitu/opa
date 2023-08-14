@@ -21,7 +21,7 @@ import (
 //go:generate go run github.com/open-policy-agent/opa build -b --signing-alg HS256 --signing-key secret testdata/signed_bundle_data --output testdata/signed.tar.gz
 
 func TestOCIDownloader_WithBundleVerificationConfig(t *testing.T) {
-	vc := bundle.NewVerificationConfig(map[string]*bundle.KeyConfig{"foo": {Key: "secret", Algorithm: "HS256"}}, "", "write", nil)
+	vc := bundle.NewVerificationConfig(map[string]*bundle.KeyConfig{"default": {Key: "secret", Algorithm: "HS256"}}, "", "", nil)
 	ctx := context.Background()
 	fixture := newTestFixture(t)
 	fixture.server.expEtag = "sha256:c5834dbce332cabe6ae68a364de171a50bf5b08024c27d7c08cc72878b4df7ff"
@@ -34,6 +34,9 @@ func TestOCIDownloader_WithBundleVerificationConfig(t *testing.T) {
 	}
 
 	d := NewOCI(config, fixture.client, "ghcr.io/org/repo:signed", "/tmp/opa/").WithCallback(func(_ context.Context, u Update) {
+		if u.Error != nil {
+			t.Fatalf("expected no error but got: %v", u.Error)
+		}
 		updates <- &u
 	}).WithBundleVerificationConfig(vc)
 

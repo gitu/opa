@@ -1334,13 +1334,16 @@ func writeHealthResponse(w http.ResponseWriter, err error) {
 }
 
 func (s *Server) v1CompilePost(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
 	explainMode := getExplain(r.URL.Query()[types.ParamExplainV1], types.ExplainOffV1)
 	includeInstrumentation := getBoolParam(r.URL, types.ParamInstrumentV1, true)
 
 	m := metrics.New()
 	m.Timer(metrics.ServerHandler).Start()
 	m.Timer(metrics.RegoQueryParse).Start()
+
+	decisionID := s.generateDecisionID()
+	ctx := logging.WithDecisionID(r.Context(), decisionID)
+	annotateSpan(ctx, decisionID)
 
 	// decompress the input if sent as zip
 	body, err := readPlainBody(r)
@@ -1371,6 +1374,14 @@ func (s *Server) v1CompilePost(w http.ResponseWriter, r *http.Request) {
 		buf = topdown.NewBufferTracer()
 	}
 
+	br, err := getRevisions(ctx, s.store, txn)
+	if err != nil {
+		writer.ErrorAuto(w, err)
+		return
+	}
+
+	logger := s.getDecisionLogger(br)
+
 	eval := rego.New(
 		rego.Compiler(s.getCompiler()),
 		rego.Store(s.store),
@@ -1388,8 +1399,19 @@ func (s *Server) v1CompilePost(w http.ResponseWriter, r *http.Request) {
 		rego.PrintHook(s.manager.PrintHook()),
 	)
 
+	var rawInput *interface{}
+	if request.Input != nil {
+		x, err := ast.JSON(request.Input)
+		if err != nil {
+			writer.ErrorAuto(w, err)
+			return
+		}
+		rawInput = &x
+	}
+
 	pq, err := eval.Partial(ctx)
 	if err != nil {
+		_ = logger.Log(ctx, txn, "", request.Query.String(), rawInput, request.Input, nil, nil, err, m)
 		switch err := err.(type) {
 		case ast.Errors:
 			writer.Error(w, http.StatusBadRequest, types.NewErrorV1(types.CodeInvalidParameter, types.MsgCompileModuleError).WithASTErrors(err))
@@ -1417,6 +1439,12 @@ func (s *Server) v1CompilePost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	result.Result = &i
+
+	var x interface{} = result.Result
+	if err := logger.Log(ctx, txn, "", request.Query.String(), rawInput, request.Input, &x, nil, nil, m); err != nil {
+		writer.ErrorAuto(w, err)
+		return
+	}
 
 	writer.JSONOK(w, result, pretty(r))
 }
@@ -2955,7 +2983,7 @@ Query:<br>
 <br><button onclick="query()">Submit</button>
 <pre><div id="result"></div></pre>
 </body>
-</html>
+</html>logger.Log(ctx, txn
 `)
 
 type decisionLogger struct {

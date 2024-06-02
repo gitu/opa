@@ -34,6 +34,8 @@ type Info struct {
 	Metrics        metrics.Metrics
 	Trace          []*topdown.Event
 	RequestID      uint64
+	Unknowns       *[]string   // used for partial compilation
+	UnknownsAST    []*ast.Term // used for partial compilation
 }
 
 // BundleInfo contains information describing a bundle.

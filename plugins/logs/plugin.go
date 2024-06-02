@@ -54,6 +54,7 @@ type EventV1 struct {
 	Path           string                  `json:"path,omitempty"`
 	Query          string                  `json:"query,omitempty"`
 	Input          *interface{}            `json:"input,omitempty"`
+	Unknowns       *[]string               `json:"unknowns,omitempty"`
 	Result         *interface{}            `json:"result,omitempty"`
 	MappedResult   *interface{}            `json:"mapped_result,omitempty"`
 	NDBuiltinCache *interface{}            `json:"nd_builtin_cache,omitempty"`
@@ -65,7 +66,8 @@ type EventV1 struct {
 	Metrics        map[string]interface{}  `json:"metrics,omitempty"`
 	RequestID      uint64                  `json:"req_id,omitempty"`
 
-	inputAST ast.Value
+	inputAST    ast.Value
+	unknownsAST []*ast.Term
 }
 
 // BundleInfoV1 describes a bundle associated with a decision log event.
@@ -90,6 +92,7 @@ var bundlesKey = ast.StringTerm("bundles")
 var pathKey = ast.StringTerm("path")
 var queryKey = ast.StringTerm("query")
 var inputKey = ast.StringTerm("input")
+var unknownsKey = ast.StringTerm("unknowns")
 var resultKey = ast.StringTerm("result")
 var mappedResultKey = ast.StringTerm("mapped_result")
 var ndBuiltinCacheKey = ast.StringTerm("nd_builtin_cache")
@@ -148,6 +151,17 @@ func (e *EventV1) AST() (ast.Value, error) {
 			}
 		}
 		event.Insert(inputKey, ast.NewTerm(e.inputAST))
+	}
+
+	if e.Unknowns != nil {
+		if e.unknownsAST == nil {
+			unknowns := make([]*ast.Term, len(*e.Unknowns))
+			for i, v := range *e.Unknowns {
+				unknowns[i] = ast.StringTerm(v)
+			}
+			e.unknownsAST = unknowns
+		}
+		event.Insert(unknownsKey, ast.NewTerm(ast.NewArray(e.unknownsAST...)))
 	}
 
 	if e.Result != nil {
@@ -249,6 +263,7 @@ const (
 	logNDBDropCounterName               = "decision_logs_nd_builtin_cache_dropped"
 	logBufferSizeLimitExDropCounterName = "decision_logs_dropped_buffer_size_limit_bytes_exceeded"
 	logEncodingFailureCounterName       = "decision_logs_encoding_failure"
+	logPartialCompile                   = "compile_logs_partial_compile"
 	defaultResourcePath                 = "/logs"
 )
 
@@ -618,6 +633,8 @@ func (p *Plugin) Log(ctx context.Context, decision *server.Info) error {
 		Timestamp:      decision.Timestamp,
 		RequestID:      decision.RequestID,
 		inputAST:       decision.InputAST,
+		unknownsAST:    decision.UnknownsAST,
+		Unknowns:       decision.Unknowns,
 	}
 
 	input, err := event.AST()

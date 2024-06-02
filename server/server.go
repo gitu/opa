@@ -1343,7 +1343,7 @@ func (s *Server) v1CompilePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	request, reqErr := readInputCompilePostV1(body)
+	request, goRequest, reqErr := readInputCompilePostV1(body)
 	if reqErr != nil {
 		writer.Error(w, http.StatusBadRequest, reqErr)
 		return
@@ -1382,14 +1382,33 @@ func (s *Server) v1CompilePost(w http.ResponseWriter, r *http.Request) {
 		rego.PrintHook(s.manager.PrintHook()),
 	)
 
+	br, err := getRevisions(ctx, s.store, txn)
+	if err != nil {
+		writer.ErrorAuto(w, err)
+		return
+	}
+	logger := s.getDecisionLogger(br)
+
+	var ndbCache builtins.NDBCache
+	if s.ndbCacheEnabled {
+		ndbCache = builtins.NDBCache{}
+	}
+
 	pq, err := eval.Partial(ctx)
 	if err != nil {
+		logger.CompileLog(ctx, txn, "", request.Query.String(), goRequest.Unknowns, request.Unknowns, goRequest.Input, request.Input, nil, ndbCache, err, m)
 		switch err := err.(type) {
 		case ast.Errors:
 			writer.Error(w, http.StatusBadRequest, types.NewErrorV1(types.CodeInvalidParameter, types.MsgCompileModuleError).WithASTErrors(err))
 		default:
 			writer.ErrorAuto(w, err)
 		}
+		return
+	}
+	var goResult interface{} = pq
+
+	if err := logger.CompileLog(ctx, txn, "", request.Query.String(), goRequest.Unknowns, request.Unknowns, goRequest.Input, request.Input, &goResult, ndbCache, nil, m); err != nil {
+		writer.ErrorAuto(w, err)
 		return
 	}
 
@@ -2829,32 +2848,32 @@ type compileRequestOptions struct {
 	DisableInlining []string
 }
 
-func readInputCompilePostV1(r io.ReadCloser) (*compileRequest, *types.ErrorV1) {
+func readInputCompilePostV1(r io.ReadCloser) (*compileRequest, *types.CompileRequestV1, *types.ErrorV1) {
 
 	var request types.CompileRequestV1
 
 	err := util.NewJSONDecoder(r).Decode(&request)
 	if err != nil {
-		return nil, types.NewErrorV1(types.CodeInvalidParameter, "error(s) occurred while decoding request: %v", err.Error())
+		return nil, nil, types.NewErrorV1(types.CodeInvalidParameter, "error(s) occurred while decoding request: %v", err.Error())
 	}
 
 	query, err := ast.ParseBody(request.Query)
 	if err != nil {
 		switch err := err.(type) {
 		case ast.Errors:
-			return nil, types.NewErrorV1(types.CodeInvalidParameter, types.MsgParseQueryError).WithASTErrors(err)
+			return nil, &request, types.NewErrorV1(types.CodeInvalidParameter, types.MsgParseQueryError).WithASTErrors(err)
 		default:
-			return nil, types.NewErrorV1(types.CodeInvalidParameter, "%v: %v", types.MsgParseQueryError, err)
+			return nil, &request, types.NewErrorV1(types.CodeInvalidParameter, "%v: %v", types.MsgParseQueryError, err)
 		}
 	} else if len(query) == 0 {
-		return nil, types.NewErrorV1(types.CodeInvalidParameter, "missing required 'query' value")
+		return nil, &request, types.NewErrorV1(types.CodeInvalidParameter, "missing required 'query' value")
 	}
 
 	var input ast.Value
 	if request.Input != nil {
 		input, err = ast.InterfaceToValue(*request.Input)
 		if err != nil {
-			return nil, types.NewErrorV1(types.CodeInvalidParameter, "error(s) occurred while converting input: %v", err)
+			return nil, &request, types.NewErrorV1(types.CodeInvalidParameter, "error(s) occurred while converting input: %v", err)
 		}
 	}
 
@@ -2864,7 +2883,7 @@ func readInputCompilePostV1(r io.ReadCloser) (*compileRequest, *types.ErrorV1) {
 		for i, s := range *request.Unknowns {
 			unknowns[i], err = ast.ParseTerm(s)
 			if err != nil {
-				return nil, types.NewErrorV1(types.CodeInvalidParameter, "error(s) occurred while parsing unknowns: %v", err)
+				return nil, &request, types.NewErrorV1(types.CodeInvalidParameter, "error(s) occurred while parsing unknowns: %v", err)
 			}
 		}
 	}
@@ -2878,7 +2897,7 @@ func readInputCompilePostV1(r io.ReadCloser) (*compileRequest, *types.ErrorV1) {
 		},
 	}
 
-	return result, nil
+	return result, &request, nil
 }
 
 var indexHTML, _ = template.New("index").Parse(`
@@ -2942,6 +2961,60 @@ type decisionLogger struct {
 	revisions map[string]string
 	revision  string // Deprecated: Use `revisions` instead.
 	logger    func(context.Context, *Info) error
+}
+
+func (l decisionLogger) CompileLog(ctx context.Context, txn storage.Transaction, path string, query string, goUnknowns *[]string, astUnknowns []*ast.Term, goInput *interface{}, astInput ast.Value, goResults *interface{}, ndbCache builtins.NDBCache, err error, m metrics.Metrics) error {
+
+	bundles := map[string]BundleInfo{}
+	for name, rev := range l.revisions {
+		bundles[name] = BundleInfo{Revision: rev}
+	}
+
+	rctx := logging.RequestContext{}
+	if r, ok := logging.FromContext(ctx); ok {
+		rctx = *r
+	}
+	decisionID, _ := logging.DecisionIDFromContext(ctx)
+
+	info := &Info{
+		Txn:         txn,
+		Bundles:     bundles,
+		Timestamp:   time.Now().UTC(),
+		DecisionID:  decisionID,
+		RemoteAddr:  rctx.ClientAddr,
+		Path:        path,
+		Query:       query,
+		Unknowns:    goUnknowns,
+		UnknownsAST: astUnknowns,
+		Input:       goInput,
+		InputAST:    astInput,
+		Results:     goResults,
+		Error:       err,
+		Metrics:     m,
+		RequestID:   rctx.ReqID,
+	}
+
+	if ndbCache != nil {
+		x, err := ast.JSON(ndbCache.AsValue())
+		if err != nil {
+			return err
+		}
+		info.NDBuiltinCache = &x
+	}
+
+	sctx := trace.SpanFromContext(ctx).SpanContext()
+	if sctx.IsValid() {
+		info.TraceID = sctx.TraceID().String()
+		info.SpanID = sctx.SpanID().String()
+	}
+
+	if l.logger != nil {
+		if err := l.logger(ctx, info); err != nil {
+			return fmt.Errorf("compile_logs: %w", err)
+		}
+	}
+
+	return nil
 }
 
 func (l decisionLogger) Log(ctx context.Context, txn storage.Transaction, path string, query string, goInput *interface{}, astInput ast.Value, goResults *interface{}, ndbCache builtins.NDBCache, err error, m metrics.Metrics) error {

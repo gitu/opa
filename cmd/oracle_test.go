@@ -9,55 +9,96 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/open-policy-agent/opa/util"
-	"github.com/open-policy-agent/opa/util/test"
+	"github.com/open-policy-agent/opa/v1/util"
+	"github.com/open-policy-agent/opa/v1/util/test"
 )
 
 func TestOracleFindDefinition(t *testing.T) {
-
-	onDiskModule := `package test
+	cases := []struct {
+		note         string
+		v0Compatible bool
+		onDiskModule string
+		stdin        string
+		paths        []string
+	}{
+		{
+			note:         "v0",
+			v0Compatible: true,
+			onDiskModule: `package test
 
 p { r }
 
-r = true`
-
-	stdin := bytes.NewBufferString(`package test
+r = true`,
+			stdin: `package test
 
 p { q }
 
-q = true`)
+q = true`,
+			paths: []string{
+				"test.rego:10",
+				"test.rego:15",
+				"test.rego:18",
+			},
+		},
+		{
+			note: "v1",
+			onDiskModule: `package test
 
-	files := map[string]string{
-		"test.rego":    onDiskModule,
-		"document.txt": "this should not be included",
-		"ignore.json":  `{"neither": "should this"}`,
+p if { r }
+
+r = true`,
+			stdin: `package test
+
+p if { q }
+
+q = true`,
+			paths: []string{
+				"test.rego:10",
+				"test.rego:15",
+				"test.rego:21",
+			},
+		},
 	}
 
-	test.WithTempFS(files, func(rootDir string) {
+	for _, tc := range cases {
+		t.Run(tc.note, func(t *testing.T) {
+			stdin := bytes.NewBufferString(tc.stdin)
 
-		params := findDefinitionParams{
-			bundlePaths: repeatedStringFlag{
-				v:     []string{rootDir},
-				isSet: true,
-			},
-			stdinBuffer: true,
-		}
+			files := map[string]string{
+				"test.rego":    tc.onDiskModule,
+				"document.txt": "this should not be included",
+				"ignore.json":  `{"neither": "should this"}`,
+			}
 
-		stdout := bytes.NewBuffer(nil)
+			test.WithTempFS(files, func(rootDir string) {
 
-		err := dofindDefinition(params, stdin, stdout, []string{path.Join(rootDir, "test.rego:10")})
-		expectJSON(t, err, stdout, `{"error": {"code": "oracle_no_match_found"}}`)
+				params := findDefinitionParams{
+					bundlePaths: repeatedStringFlag{
+						v:     []string{rootDir},
+						isSet: true,
+					},
+					stdinBuffer:  true,
+					v0Compatible: tc.v0Compatible,
+				}
 
-		err = dofindDefinition(params, stdin, stdout, []string{path.Join(rootDir, "test.rego:15")})
-		expectJSON(t, err, stdout, `{"error": {"code": "oracle_no_definition_found"}}`)
+				stdout := bytes.NewBuffer(nil)
 
-		err = dofindDefinition(params, stdin, stdout, []string{path.Join(rootDir, "test.rego:18")})
-		expectJSON(t, err, stdout, fmt.Sprintf(`{"result": {
+				err := dofindDefinition(params, stdin, stdout, []string{path.Join(rootDir, tc.paths[0])})
+				expectJSON(t, err, stdout, `{"error": {"code": "oracle_no_match_found"}}`)
+
+				err = dofindDefinition(params, stdin, stdout, []string{path.Join(rootDir, tc.paths[1])})
+				expectJSON(t, err, stdout, `{"error": {"code": "oracle_no_definition_found"}}`)
+
+				err = dofindDefinition(params, stdin, stdout, []string{path.Join(rootDir, tc.paths[2])})
+				expectJSON(t, err, stdout, fmt.Sprintf(`{"result": {
 			"file": %q,
 			"row": 5,
 			"col": 1
 		}}`, path.Join(rootDir, "test.rego")))
-	})
+			})
+		})
+	}
+
 }
 
 func expectJSON(t *testing.T, err error, buffer *bytes.Buffer, exp string) {

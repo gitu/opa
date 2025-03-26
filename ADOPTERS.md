@@ -9,6 +9,13 @@ production users that have added themselves (in alphabetical order):
 * [2U, Inc](https://2u.com) has incorporated OPA into their SDLC for both Terraform and Kubernetes deployments.
   Shift left!
 
+* [APIwiz](https://www.apiwiz.io) has implemented OPA as a centralized service to enforce consistent
+  and secure authorization decisions across all internal APIs. By delegating authorization logic to OPA,
+  APIwiz streamlines access control, ensuring robust security throughout the platform. Furthermore, OPA
+  has been seamlessly integrated into APIwiz's API Builder, enabling users to embed policy-driven workflows.
+  This integration provides precise control over workflows, enhancing both the security and efficiency of
+  the platform's operations.
+
 * [Appsflyer](https://www.appsflyer.com/) uses OPA to make consistent
   authorization decisions by hundreds of microservices for UI and API data
   access. All authorization decisions are delegated to OPA that is deployed as a
@@ -80,9 +87,18 @@ production users that have added themselves (in alphabetical order):
   changes before they're deployed to production, and produce audit trails to eliminate
   manual work and accelerate audit processes like SOC and ISO.
 
-* [Fugue](https://fugue.co) is a cloud security SaaS that uses OPA to
+* [Elastic](https://www.elastic.co/) uses OPA in its Cloud Security offering to enable CSPM and KSPM solutions, helping customers adhere to best practices
+  defined in CIS benchmarks by tracking misconfigurations on AWS, GCP and Azure. the code is Open Source, see [Security Policies](https://github.com/elastic/cloudbeat/tree/main/security-policies).
+
+* [Facets.cloud](https://www.facets.cloud/) is a DevOps platform designed to streamline software development and deployment processes.
+  The integration of Open Policy Agent (OPA) has been a key factor in developing our [Guardrails Policy](https://readme.facets.cloud/docs/guardrail-policy) feature.
+  Managed using OPA, this feature enables our customers to set rules that align their software blueprints(detailed architectural designs of their software) - with established standards.
+  The Guardrails Policy feature has optimized resource management, minimized redundancy in policy definitions, and ensured comprehensive adherence to organizations’ best practices.
+
+* [Fugue](https://fugue.co) was a cloud security SaaS that uses OPA to
   classify compliance violations and security risks in AWS and Azure
-  accounts and generate compliance reports and notifications.
+  accounts and generate compliance reports and notifications. Now part of
+  [Snyk](https://snyk.com).
 
 * [Goldman Sachs](https://www.goldmansachs.com/) uses OPA to enforce admission control
   policies in their multi-tenant Kubernetes clusters as well as for _provisioning_
@@ -115,6 +131,11 @@ production users that have added themselves (in alphabetical order):
   Gatekeeper. Jetstack also uses OPA via the Golang API in _Jetstack Secure_ to
   automate the checking of resources against our best practice recommendations.
 
+* [Marsh McLennan](https://www.marshmclennan.com) uses OPA Gatekeeper in their
+  Kubernetes clusters, and OPA as an authorization decision point by many
+  applications for ingress traffic. Some applications also use OPA as a rules
+  engine.
+
 * [Medallia](https://www.medallia.com/) uses OPA to audit AWS
   resources for compliance violations. The policies search across
   state from Terraform and AWS APIs to identify security violations
@@ -126,6 +147,11 @@ production users that have added themselves (in alphabetical order):
   the governance of the cluster, checking that developers are following
   the best practices in the admission controller. They also use [confest](https://github.com/open-policy-agent/conftest) to
   enforce policies in their CI/CD pipeline.
+
+* [Mia-Platform](https://mia-platform.eu/) uses OPA to run RBAC authorization policies
+  distributed within the application microservices. They built [Rönd](https://github.com/rond-authz/rond)
+  sidecar to intercept API invocation in the kubernetes ecosystem and created an extensible
+  RBAC solution that protects the application with little-to-none changes to the existing codebase.
 
 * [Netflix](https://www.netflix.com) uses OPA as a method of enforcing
   access control in microservices across a variety of languages and
@@ -151,7 +177,7 @@ production users that have added themselves (in alphabetical order):
   has enabled Plex to have a consistent means of policy enforcement,
   no matter the environment.
 
-* [Splash]([https://splashthat.com) uses OPA to handle fine-grained authorization
+* [Splash](https://splashthat.com) uses OPA to handle fine-grained authorization
   across its entire platform, implemented as both a sidecar in Kubernetes and a separate
   container on bare instances. Policies and datasets are recompiled and updated based
   on changes to users' roles and permissions.
@@ -241,18 +267,6 @@ pre-production (in alphabetical order):
   company. Still in stealth mode but using OPA to manage and enforce
   fine-grained authorization policies.
 
-* [build.security](https://build.security/) is a venture-funded cyber security
-  company, making it easy for developers to build role-based and attribute-based
-  access controls to their applications and services. build.security is leveraging
-  OPA and rego at their core technology.
-
-* [ORY Keto](https://github.com/ory/keto) replaced their internal
-  decision engine with OPA. By leveraging OPA, ORY Keto was able to
-  simplify their access control server implementation while retaining
-  the ability to easily add high-level models like ACLs and RBAC. In
-  December 2018, ~850 ORY Keto instances were running in a mix of
-  pre-production and production environments.
-
 * [Permit.io](https://permit.io) Uses a combination of OPA and OPAL
   to power fine-grained authorization policies at the core of the Permit.io platform.
   Permit.io leverages the power of OPA's Rego language,
@@ -273,6 +287,8 @@ pre-production (in alphabetical order):
   unwanted code.
 
 * [Magda](https://github.com/magda-io/magda) is a federated, Kubernetes-based, open-source data catalog system. Working as Magda's central authorisation policy engine, OPA helps not only the API endpoint authorisation. Magda also uses its partial evaluation feature to translate datasets authorisation decisions to other database-specific DSLs (e.g. SQL or Elasticsearch DSL) and use them for dataset authorisation enforcement in different databases.
+
+* [VodafoneZiggo](https://www.vodafoneziggo.nl/) Is a Dutch telecommunications company that uses OPA to power authorisation decisions in our internal developer platform based on Backstage, it is also used as a way to enforce and validate component metadata that is onboarded as software components into the Backstage software catalog.
 
 Other adopters that have gone into production or various stages of
 testing include:

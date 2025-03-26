@@ -6,31 +6,34 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
+	"testing"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/open-policy-agent/opa/internal/pathwatcher"
 	initload "github.com/open-policy-agent/opa/internal/runtime/init"
-	"github.com/open-policy-agent/opa/loader"
 	"github.com/spf13/cobra"
 
-	"github.com/open-policy-agent/opa/ast"
-	"github.com/open-policy-agent/opa/bundle"
-	"github.com/open-policy-agent/opa/compile"
-	"github.com/open-policy-agent/opa/cover"
+	"github.com/open-policy-agent/opa/cmd/internal/env"
 	"github.com/open-policy-agent/opa/internal/runtime"
-	"github.com/open-policy-agent/opa/storage"
-	"github.com/open-policy-agent/opa/storage/inmem"
-	"github.com/open-policy-agent/opa/tester"
-	"github.com/open-policy-agent/opa/topdown"
-	"github.com/open-policy-agent/opa/topdown/lineage"
-	"github.com/open-policy-agent/opa/util"
+	"github.com/open-policy-agent/opa/v1/ast"
+	"github.com/open-policy-agent/opa/v1/bundle"
+	"github.com/open-policy-agent/opa/v1/compile"
+	"github.com/open-policy-agent/opa/v1/cover"
+	"github.com/open-policy-agent/opa/v1/loader"
+	"github.com/open-policy-agent/opa/v1/storage"
+	"github.com/open-policy-agent/opa/v1/storage/inmem"
+	"github.com/open-policy-agent/opa/v1/tester"
+	"github.com/open-policy-agent/opa/v1/topdown"
+	"github.com/open-policy-agent/opa/v1/topdown/lineage"
+	"github.com/open-policy-agent/opa/v1/util"
 )
 
 const (
@@ -60,6 +63,9 @@ type testCommandParams struct {
 	stopChan     chan os.Signal
 	output       io.Writer
 	errOutput    io.Writer
+	v0Compatible bool
+	v1Compatible bool
+	varValues    bool
 }
 
 func newTestCommandParams() testCommandParams {
@@ -73,6 +79,17 @@ func newTestCommandParams() testCommandParams {
 		errOutput:    os.Stderr,
 		stopChan:     make(chan os.Signal, 1),
 	}
+}
+
+func (p *testCommandParams) RegoVersion() ast.RegoVersion {
+	// v0 takes precedence over v1
+	if p.v0Compatible {
+		return ast.RegoV0
+	}
+	if p.v1Compatible {
+		return ast.RegoV1
+	}
+	return ast.DefaultRegoVersion
 }
 
 func opaTest(args []string, testParams testCommandParams) (int, error) {
@@ -100,11 +117,17 @@ func opaTest(args []string, testParams testCommandParams) (int, error) {
 	var bundles map[string]*bundle.Bundle
 	var store storage.Store
 
+	popts := ast.ParserOptions{
+		RegoVersion:       testParams.RegoVersion(),
+		Capabilities:      testParams.capabilities.C,
+		ProcessAnnotation: true,
+	}
+
 	if testParams.bundleMode {
-		bundles, err = tester.LoadBundles(args, filter.Apply)
+		bundles, err = tester.LoadBundlesWithParserOptions(args, filter.Apply, popts)
 		store = inmem.NewWithOpts(inmem.OptRoundTripOnWrite(false))
 	} else {
-		modules, store, err = tester.Load(args, filter.Apply)
+		modules, store, err = tester.LoadWithParserOptions(args, filter.Apply, popts)
 	}
 
 	if err != nil {
@@ -126,7 +149,7 @@ func opaTest(args []string, testParams testCommandParams) (int, error) {
 	}
 
 	success := true
-	for i := 0; i < testParams.count; i++ {
+	for range testParams.count {
 		exitCode, err := runTests(ctx, txn, runner, reporter, testParams)
 		if exitCode != 0 {
 			success = false
@@ -160,6 +183,11 @@ func runTests(ctx context.Context, txn storage.Transaction, runner *tester.Runne
 	var err error
 	var ch chan *tester.Result
 	if testParams.benchmark {
+		// Initialize testing package for benchmarking. This is needed to set default values for some flags that may
+		// otherwise be dereferenced on some code paths causing panics, as reported in:
+		// https://github.com/open-policy-agent/opa/issues/7205
+		testing.Init()
+
 		benchOpts := tester.BenchmarkOptions{
 			ReportAllocations: testParams.benchMem,
 		}
@@ -271,7 +299,7 @@ func processWatcherUpdate(ctx context.Context, testParams testCommandParams, pat
 
 	var loadResult *initload.LoadPathsResult
 
-	err := pathwatcher.ProcessWatcherUpdate(ctx, paths, removed, store, filter.Apply, testParams.bundleMode,
+	err := pathwatcher.ProcessWatcherUpdateForRegoVersion(ctx, testParams.RegoVersion(), paths, removed, store, filter.Apply, testParams.bundleMode,
 		func(ctx context.Context, txn storage.Transaction, loaded *initload.LoadPathsResult) error {
 			if len(loaded.Files.Documents) > 0 || removed != "" {
 				if err := store.Write(ctx, txn, storage.AddOp, storage.Path{}, loaded.Files.Documents); err != nil {
@@ -300,7 +328,7 @@ func processWatcherUpdate(ctx context.Context, testParams testCommandParams, pat
 			return err
 		}
 
-		for i := 0; i < testParams.count; i++ {
+		for range testParams.count {
 			exitCode, err := runTests(ctx, txn, runner, reporter, testParams)
 			if exitCode != 0 {
 				return err
@@ -339,7 +367,8 @@ func compileAndSetupTests(ctx context.Context, testParams testCommandParams, sto
 		WithEnablePrintStatements(!testParams.benchmark).
 		WithCapabilities(capabilities).
 		WithSchemas(schemaSet).
-		WithUseTypeCheckAnnotations(true)
+		WithUseTypeCheckAnnotations(true).
+		WithRewriteTestRules(testParams.varValues)
 
 	info, err := runtime.Term(runtime.Params{})
 	if err != nil {
@@ -357,7 +386,7 @@ func compileAndSetupTests(ctx context.Context, testParams testCommandParams, sto
 		if testParams.benchmark {
 			errMsg := "coverage reporting is not supported when benchmarking tests"
 			fmt.Fprintln(testParams.errOutput, errMsg)
-			return nil, nil, fmt.Errorf(errMsg)
+			return nil, nil, errors.New(errMsg)
 		}
 		cov = cover.New()
 		coverTracer = cov
@@ -375,7 +404,7 @@ func compileAndSetupTests(ctx context.Context, testParams testCommandParams, sto
 		SetCompiler(compiler).
 		SetStore(store).
 		CapturePrintOutput(true).
-		EnableTracing(testParams.verbose).
+		EnableTracing(testParams.verbose || testParams.varValues).
 		SetCoverageQueryTracer(coverTracer).
 		SetRuntime(info).
 		SetModules(modules).
@@ -404,6 +433,8 @@ func compileAndSetupTests(ctx context.Context, testParams testCommandParams, sto
 				BenchmarkResults:         testParams.benchmark,
 				BenchMarkShowAllocations: testParams.benchMem,
 				BenchMarkGoBenchFormat:   goBench,
+				FailureLine:              testParams.varValues,
+				LocalVars:                testParams.varValues,
 			}
 		}
 	} else {
@@ -426,7 +457,7 @@ func init() {
 		Use:   "test <path> [path [...]]",
 		Short: "Execute Rego test cases",
 		Long: `Execute Rego test cases.
-	
+
 The 'test' command takes a file or directory path as input and executes all
 test cases discovered in matching files. Test cases are rules whose names have the prefix "test_".
 
@@ -441,8 +472,6 @@ while still getting marked as skipped in the test results.
 Example policy (example/authz.rego):
 
 	package authz
-
-	import future.keywords.if
 
 	allow if {
 		input.path == ["users"]
@@ -460,23 +489,23 @@ Example test (example/authz_test.rego):
 
 	import data.authz.allow
 
-	test_post_allowed {
+	test_post_allowed if {
 		allow with input as {"path": ["users"], "method": "POST"}
 	}
 
-	test_get_denied {
+	test_get_denied if {
 		not allow with input as {"path": ["users"], "method": "GET"}
 	}
 
-	test_get_user_allowed {
+	test_get_user_allowed if {
 		allow with input as {"path": ["users", "bob"], "method": "GET", "user_id": "bob"}
 	}
 
-	test_get_another_user_denied {
+	test_get_another_user_denied if {
 		not allow with input as {"path": ["users", "bob"], "method": "GET", "user_id": "alice"}
 	}
 
-	todo_test_user_allowed_http_client_data {
+	todo_test_user_allowed_http_client_data if {
 		false # Remember to test this later!
 	}
 
@@ -496,9 +525,9 @@ The --watch flag can be used to monitor policy and data file-system changes. Whe
 the policy and data and then re-runs the tests. Watching individual files (rather than directories) is generally not
 recommended as some updates might cause them to be dropped by OPA.
 `,
-		PreRunE: func(Cmd *cobra.Command, args []string) error {
+		PreRunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				return fmt.Errorf("specify at least one file")
+				return errors.New("specify at least one file")
 			}
 
 			// If an --explain flag was set, turn on verbose output
@@ -506,10 +535,10 @@ recommended as some updates might cause them to be dropped by OPA.
 				testParams.verbose = true
 			}
 
-			return nil
+			return env.CmdFlags.CheckEnvironmentVariables(cmd)
 		},
 
-		Run: func(cmd *cobra.Command, args []string) {
+		Run: func(_ *cobra.Command, args []string) {
 			exitCode, _ := opaTest(args, testParams)
 			os.Exit(exitCode)
 		},
@@ -525,6 +554,7 @@ recommended as some updates might cause them to be dropped by OPA.
 	testCommand.Flags().BoolVar(&testParams.benchmark, "bench", false, "benchmark the unit tests")
 	testCommand.Flags().StringVarP(&testParams.runRegex, "run", "r", "", "run only test cases matching the regular expression.")
 	testCommand.Flags().BoolVarP(&testParams.watch, "watch", "w", false, "watch command line files for changes")
+	testCommand.Flags().BoolVar(&testParams.varValues, "var-values", false, "show local variable values in test output")
 
 	// Shared flags
 	addBundleModeFlag(testCommand.Flags(), &testParams.bundleMode, false)
@@ -536,6 +566,8 @@ recommended as some updates might cause them to be dropped by OPA.
 	addTargetFlag(testCommand.Flags(), testParams.target)
 	addCapabilitiesFlag(testCommand.Flags(), testParams.capabilities)
 	addSchemaFlags(testCommand.Flags(), testParams.schema)
+	addV0CompatibleFlag(testCommand.Flags(), &testParams.v0Compatible, false)
+	addV1CompatibleFlag(testCommand.Flags(), &testParams.v1Compatible, false)
 
 	RootCommand.AddCommand(testCommand)
 }

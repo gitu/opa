@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -16,9 +17,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/open-policy-agent/opa/bundle"
+	"github.com/open-policy-agent/opa/cmd/internal/env"
 	initload "github.com/open-policy-agent/opa/internal/runtime/init"
-	"github.com/open-policy-agent/opa/util"
+	"github.com/open-policy-agent/opa/v1/bundle"
+	"github.com/open-policy-agent/opa/v1/util"
 )
 
 type signCmdParams struct {
@@ -36,7 +38,7 @@ const (
 	signaturesFile         = ".signatures.json"
 )
 
-var errSigningConfigIncomplete = fmt.Errorf("specify the secret (HMAC) or path of the PEM file containing the private key (RSA and ECDSA)")
+var errSigningConfigIncomplete = errors.New("specify the secret (HMAC) or path of the PEM file containing the private key (RSA and ECDSA)")
 
 func newSignCmdParams() signCmdParams {
 	return signCmdParams{}
@@ -130,11 +132,14 @@ a JSON file containing optional claims.
 For more information on the format of the ".signatures.json" file see
 https://www.openpolicyagent.org/docs/latest/management-bundles/#signature-format.
 `,
-		PreRunE: func(Cmd *cobra.Command, args []string) error {
-			return validateSignParams(args, cmdParams)
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			if err := validateSignParams(args, cmdParams); err != nil {
+				return err
+			}
+			return env.CmdFlags.CheckEnvironmentVariables(cmd)
 		},
 
-		Run: func(cmd *cobra.Command, args []string) {
+		Run: func(_ *cobra.Command, args []string) {
 			if err := doSign(args, cmdParams); err != nil {
 				fmt.Println("error:", err)
 				os.Exit(1)
@@ -269,7 +274,7 @@ func writeTokenToFile(token, fileLoc string) error {
 
 func validateSignParams(args []string, params signCmdParams) error {
 	if len(args) == 0 {
-		return fmt.Errorf("specify atleast one path containing policy and/or data files")
+		return errors.New("specify atleast one path containing policy and/or data files")
 	}
 
 	if params.key == "" {
@@ -277,7 +282,7 @@ func validateSignParams(args []string, params signCmdParams) error {
 	}
 
 	if !params.bundleMode {
-		return fmt.Errorf("enable bundle mode (ie. --bundle) to sign bundle files or directories")
+		return errors.New("enable bundle mode (ie. --bundle) to sign bundle files or directories")
 	}
 	return nil
 }

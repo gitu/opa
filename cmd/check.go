@@ -5,16 +5,19 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 
 	"github.com/spf13/cobra"
 
-	"github.com/open-policy-agent/opa/ast"
+	"github.com/open-policy-agent/opa/cmd/internal/env"
 	pr "github.com/open-policy-agent/opa/internal/presentation"
-	"github.com/open-policy-agent/opa/loader"
-	"github.com/open-policy-agent/opa/util"
+	"github.com/open-policy-agent/opa/v1/ast"
+	"github.com/open-policy-agent/opa/v1/loader"
+	"github.com/open-policy-agent/opa/v1/util"
 )
 
 type checkParams struct {
@@ -26,6 +29,8 @@ type checkParams struct {
 	schema       *schemaFlags
 	strict       bool
 	regoV1       bool
+	v0Compatible bool
+	v1Compatible bool
 }
 
 func newCheckParams() checkParams {
@@ -36,6 +41,21 @@ func newCheckParams() checkParams {
 		capabilities: newcapabilitiesFlag(),
 		schema:       &schemaFlags{},
 	}
+}
+
+func (p *checkParams) regoVersion() ast.RegoVersion {
+	// The '--rego-v1' flag takes precedence over the '--v1-compatible' flag.
+	if p.regoV1 {
+		return ast.RegoV0CompatV1
+	}
+	// The '--v0-compatible' flag takes precedence over the '--v1-compatible' flag.
+	if p.v0Compatible {
+		return ast.RegoV0
+	}
+	if p.v1Compatible {
+		return ast.RegoV1
+	}
+	return ast.DefaultRegoVersion
 }
 
 const (
@@ -54,7 +74,7 @@ func checkModules(params checkParams, args []string) error {
 	if params.capabilities.C != nil {
 		capabilities = params.capabilities.C
 	} else {
-		capabilities = ast.CapabilitiesForThisVersion()
+		capabilities = ast.CapabilitiesForThisVersion(ast.CapabilitiesRegoVersion(params.regoVersion()))
 	}
 
 	ss, err := loader.Schemas(params.schema.path)
@@ -65,10 +85,11 @@ func checkModules(params checkParams, args []string) error {
 	if params.bundleMode {
 		for _, path := range args {
 			b, err := loader.NewFileLoader().
-				WithRegoV1Compatible(params.regoV1).
+				WithRegoVersion(params.regoVersion()).
 				WithSkipBundleVerification(true).
 				WithProcessAnnotation(true).
 				WithCapabilities(capabilities).
+				WithFilter(filterFromPaths(params.ignore)).
 				AsBundle(path)
 			if err != nil {
 				return err
@@ -84,7 +105,7 @@ func checkModules(params checkParams, args []string) error {
 		}
 
 		result, err := loader.NewFileLoader().
-			WithRegoV1Compatible(params.regoV1).
+			WithRegoVersion(params.regoVersion()).
 			WithProcessAnnotation(true).
 			WithCapabilities(capabilities).
 			Filtered(args, f.Apply)
@@ -110,6 +131,12 @@ func checkModules(params checkParams, args []string) error {
 		return compiler.Errors
 	}
 	return nil
+}
+
+func filterFromPaths(paths []string) loader.Filter {
+	return func(abspath string, info fs.FileInfo, depth int) bool {
+		return loaderFilter{Ignore: paths}.Apply(abspath, info, depth)
+	}
 }
 
 func outputErrors(format string, err error) {
@@ -146,11 +173,11 @@ func init() {
 	is produced. If the parsing or compiling fails, 'check' will output the errors
 	and exit with a non-zero exit code.`,
 
-		PreRunE: func(_ *cobra.Command, args []string) error {
+		PreRunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
-				return fmt.Errorf("specify at least one file")
+				return errors.New("specify at least one file")
 			}
-			return nil
+			return env.CmdFlags.CheckEnvironmentVariables(cmd)
 		},
 
 		Run: func(_ *cobra.Command, args []string) {
@@ -168,6 +195,9 @@ func init() {
 	addCapabilitiesFlag(checkCommand.Flags(), checkParams.capabilities)
 	addSchemaFlags(checkCommand.Flags(), checkParams.schema)
 	addStrictFlag(checkCommand.Flags(), &checkParams.strict, false)
-	checkCommand.Flags().BoolVar(&checkParams.regoV1, "rego-v1", false, "check for Rego v1 compatibility (policies must also be compatible with current OPA version)")
+	addRegoV0V1FlagWithDescription(checkCommand.Flags(), &checkParams.regoV1, false,
+		"check for Rego v0 and v1 compatibility (policies must be compatible with both Rego versions)")
+	addV0CompatibleFlag(checkCommand.Flags(), &checkParams.v0Compatible, false)
+	addV1CompatibleFlag(checkCommand.Flags(), &checkParams.v1Compatible, false)
 	RootCommand.AddCommand(checkCommand)
 }

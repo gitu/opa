@@ -17,59 +17,78 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/open-policy-agent/opa/ast"
-	"github.com/open-policy-agent/opa/ast/location"
-	"github.com/open-policy-agent/opa/bundle"
-	"github.com/open-policy-agent/opa/compile"
-	"github.com/open-policy-agent/opa/cover"
+	"github.com/open-policy-agent/opa/cmd/internal/env"
 	fileurl "github.com/open-policy-agent/opa/internal/file/url"
 	pr "github.com/open-policy-agent/opa/internal/presentation"
 	"github.com/open-policy-agent/opa/internal/runtime"
-	"github.com/open-policy-agent/opa/loader"
-	"github.com/open-policy-agent/opa/metrics"
-	"github.com/open-policy-agent/opa/profiler"
-	"github.com/open-policy-agent/opa/rego"
-	"github.com/open-policy-agent/opa/topdown"
-	"github.com/open-policy-agent/opa/topdown/lineage"
-	"github.com/open-policy-agent/opa/util"
+	"github.com/open-policy-agent/opa/v1/ast"
+	"github.com/open-policy-agent/opa/v1/ast/location"
+	"github.com/open-policy-agent/opa/v1/bundle"
+	"github.com/open-policy-agent/opa/v1/compile"
+	"github.com/open-policy-agent/opa/v1/cover"
+	"github.com/open-policy-agent/opa/v1/loader"
+	"github.com/open-policy-agent/opa/v1/metrics"
+	"github.com/open-policy-agent/opa/v1/profiler"
+	"github.com/open-policy-agent/opa/v1/rego"
+	"github.com/open-policy-agent/opa/v1/topdown"
+	"github.com/open-policy-agent/opa/v1/topdown/lineage"
+	"github.com/open-policy-agent/opa/v1/util"
+)
+
+var (
+	errIllegalUnknownsArg = errors.New("illegal argument with --unknowns, specify string with one or more --unknowns")
 )
 
 type evalCommandParams struct {
-	capabilities        *capabilitiesFlag
-	coverage            bool
-	partial             bool
-	unknowns            []string
-	disableInlining     []string
-	shallowInlining     bool
-	disableIndexing     bool
-	disableEarlyExit    bool
-	strictBuiltinErrors bool
-	showBuiltinErrors   bool
-	dataPaths           repeatedStringFlag
-	inputPath           string
-	imports             repeatedStringFlag
-	pkg                 string
-	stdin               bool
-	stdinInput          bool
-	explain             *util.EnumFlag
-	metrics             bool
-	instrument          bool
-	ignore              []string
-	outputFormat        *util.EnumFlag
-	profile             bool
-	profileCriteria     repeatedStringFlag
-	profileLimit        intFlag
-	count               int
-	prettyLimit         intFlag
-	fail                bool
-	failDefined         bool
-	bundlePaths         repeatedStringFlag
-	schema              *schemaFlags
-	target              *util.EnumFlag
-	timeout             time.Duration
-	optimizationLevel   int
-	entrypoints         repeatedStringFlag
-	strict              bool
+	capabilities              *capabilitiesFlag
+	coverage                  bool
+	partial                   bool
+	unknowns                  []string
+	disableInlining           []string
+	nondeterministicBuiltions bool
+	shallowInlining           bool
+	disableIndexing           bool
+	disableEarlyExit          bool
+	strictBuiltinErrors       bool
+	showBuiltinErrors         bool
+	dataPaths                 repeatedStringFlag
+	inputPath                 string
+	imports                   repeatedStringFlag
+	pkg                       string
+	stdin                     bool
+	stdinInput                bool
+	explain                   *util.EnumFlag
+	metrics                   bool
+	instrument                bool
+	ignore                    []string
+	outputFormat              *util.EnumFlag
+	profile                   bool
+	profileCriteria           repeatedStringFlag
+	profileLimit              intFlag
+	count                     int
+	prettyLimit               intFlag
+	fail                      bool
+	failDefined               bool
+	bundlePaths               repeatedStringFlag
+	schema                    *schemaFlags
+	target                    *util.EnumFlag
+	timeout                   time.Duration
+	optimizationLevel         int
+	entrypoints               repeatedStringFlag
+	strict                    bool
+	v0Compatible              bool
+	v1Compatible              bool
+	traceVarValues            bool
+	ReadAstValuesFromStore    bool
+}
+
+func (p *evalCommandParams) regoVersion() ast.RegoVersion {
+	if p.v0Compatible {
+		return ast.RegoV0
+	} else if p.v1Compatible {
+		return ast.RegoV1
+	}
+	return ast.DefaultRegoVersion
 }
 
 func newEvalCommandParams() evalCommandParams {
@@ -95,6 +114,7 @@ func newEvalCommandParams() evalCommandParams {
 }
 
 func validateEvalParams(p *evalCommandParams, cmdArgs []string) error {
+
 	if len(cmdArgs) > 0 && p.stdin {
 		return errors.New("specify query argument or --stdin but not both")
 	} else if len(cmdArgs) == 0 && !p.stdin {
@@ -118,9 +138,24 @@ func validateEvalParams(p *evalCommandParams, cmdArgs []string) error {
 		return errors.New("invalid output format for evaluation")
 	}
 
+	// check if illegal arguments is passed with unknowns flag
+	for _, unknwn := range p.unknowns {
+		term, err := ast.ParseTerm(unknwn)
+		if err != nil {
+			return err
+		}
+
+		switch term.Value.(type) {
+		case ast.Ref:
+			return nil
+		default:
+			return errIllegalUnknownsArg
+		}
+	}
+
 	if p.optimizationLevel > 0 {
 		if len(p.dataPaths.v) > 0 && p.bundlePaths.isFlagSet() {
-			return fmt.Errorf("specify either --data or --bundle flag with optimization level greater than 0")
+			return errors.New("specify either --data or --bundle flag with optimization level greater than 0")
 		}
 	}
 
@@ -269,9 +304,12 @@ access.
 `,
 
 		PreRunE: func(cmd *cobra.Command, args []string) error {
-			return validateEvalParams(&params, args)
+			if err := validateEvalParams(&params, args); err != nil {
+				return err
+			}
+			return env.CmdFlags.CheckEnvironmentVariables(cmd)
 		},
-		Run: func(cmd *cobra.Command, args []string) {
+		Run: func(_ *cobra.Command, args []string) {
 
 			defined, err := eval(args, params, os.Stdout)
 			if err != nil {
@@ -291,6 +329,7 @@ access.
 	evalCommand.Flags().BoolVarP(&params.coverage, "coverage", "", false, "report coverage")
 	evalCommand.Flags().StringArrayVarP(&params.disableInlining, "disable-inlining", "", []string{}, "set paths of documents to exclude from inlining")
 	evalCommand.Flags().BoolVarP(&params.shallowInlining, "shallow-inlining", "", false, "disable inlining of rules that depend on unknowns")
+	evalCommand.Flags().BoolVarP(&params.nondeterministicBuiltions, "nondeterminstic-builtins", "", false, "evaluate nondeterministic builtins (if all arguments are known) during partial eval")
 	evalCommand.Flags().BoolVar(&params.disableIndexing, "disable-indexing", false, "disable indexing optimizations")
 	evalCommand.Flags().BoolVar(&params.disableEarlyExit, "disable-early-exit", false, "disable 'early exit' optimizations")
 	evalCommand.Flags().BoolVarP(&params.strictBuiltinErrors, "strict-builtin-errors", "", false, "treat the first built-in function error encountered as fatal")
@@ -302,9 +341,9 @@ access.
 	evalCommand.Flags().VarP(&params.prettyLimit, "pretty-limit", "", "set limit after which pretty output gets truncated")
 	evalCommand.Flags().BoolVarP(&params.failDefined, "fail-defined", "", false, "exits with non-zero exit code on defined/non-empty result and errors")
 	evalCommand.Flags().DurationVar(&params.timeout, "timeout", 0, "set eval timeout (default unlimited)")
-
 	evalCommand.Flags().IntVarP(&params.optimizationLevel, "optimize", "O", 0, "set optimization level")
 	evalCommand.Flags().VarP(&params.entrypoints, "entrypoint", "e", "set slash separated entrypoint path")
+	evalCommand.Flags().BoolVar(&params.traceVarValues, "var-values", false, "show local variable values in pretty trace output")
 
 	// Shared flags
 	addCapabilitiesFlag(evalCommand.Flags(), params.capabilities)
@@ -326,6 +365,9 @@ access.
 	addTargetFlag(evalCommand.Flags(), params.target)
 	addCountFlag(evalCommand.Flags(), &params.count, "benchmark")
 	addStrictFlag(evalCommand.Flags(), &params.strict, false)
+	addV0CompatibleFlag(evalCommand.Flags(), &params.v0Compatible, false)
+	addV1CompatibleFlag(evalCommand.Flags(), &params.v1Compatible, false)
+	addReadAstValuesFromStoreFlag(evalCommand.Flags(), &params.ReadAstValuesFromStore, false)
 
 	RootCommand.AddCommand(evalCommand)
 }
@@ -352,7 +394,7 @@ func eval(args []string, params evalCommandParams, w io.Writer) (bool, error) {
 	profiles := make([][]profiler.ExprStats, ectx.params.count)
 	timers := make([]map[string]interface{}, ectx.params.count)
 
-	for i := 0; i < ectx.params.count; i++ {
+	for i := range ectx.params.count {
 		results[i] = evalOnce(ctx, ectx)
 		profiles[i] = results[i].Profile
 		if ts, ok := results[i].Metrics.(metrics.TimerMetrics); ok {
@@ -372,7 +414,7 @@ func eval(args []string, params evalCommandParams, w io.Writer) (bool, error) {
 			for _, t := range timers {
 				val, ok := t[name].(int64)
 				if !ok {
-					return false, fmt.Errorf("missing timer for %s" + name)
+					return false, fmt.Errorf("missing timer for %s", name)
 				}
 				vals = append(vals, val)
 			}
@@ -392,7 +434,12 @@ func eval(args []string, params evalCommandParams, w io.Writer) (bool, error) {
 	case evalValuesOutput:
 		err = pr.Values(w, result)
 	case evalPrettyOutput:
-		err = pr.Pretty(w, result)
+		err = pr.PrettyWithOptions(w, result, pr.PrettyOptions{
+			TraceOpts: topdown.PrettyTraceOptions{
+				Locations:     true,
+				ExprVariables: ectx.params.traceVarValues,
+			},
+		})
 	case evalSourceOutput:
 		err = pr.Source(w, result)
 	case evalRawOutput:
@@ -454,7 +501,6 @@ func evalOnce(ctx context.Context, ectx *evalContext) pr.Output {
 	result.Errors = pr.NewOutputErrors(resultErr)
 	if ectx.builtInErrorList != nil {
 		for _, err := range *(ectx.builtInErrorList) {
-			err := err
 			result.Errors = append(result.Errors, pr.NewOutputErrors(&err)...)
 		}
 	}
@@ -523,10 +569,17 @@ func setupEval(args []string, params evalCommandParams) (*evalContext, error) {
 		return nil, err
 	}
 
-	regoArgs := []func(*rego.Rego){rego.Query(query), rego.Runtime(info)}
+	regoArgs := []func(*rego.Rego){
+		rego.Query(query),
+		rego.Runtime(info),
+		rego.SetRegoVersion(params.regoVersion()),
+		rego.StoreReadAST(params.ReadAstValuesFromStore),
+	}
+
 	evalArgs := []rego.EvalOption{
 		rego.EvalRuleIndexing(!params.disableIndexing),
 		rego.EvalEarlyExit(!params.disableEarlyExit),
+		rego.EvalNondeterministicBuiltins(params.nondeterministicBuiltions),
 	}
 
 	if len(params.imports.v) > 0 {
@@ -646,7 +699,7 @@ func setupEval(args []string, params evalCommandParams) (*evalContext, error) {
 	if params.strictBuiltinErrors {
 		regoArgs = append(regoArgs, rego.StrictBuiltinErrors(true))
 		if params.showBuiltinErrors {
-			return nil, fmt.Errorf("cannot use --show-builtin-errors with --strict-builtin-errors, --strict-builtin-errors will return the first built-in error encountered immediately")
+			return nil, errors.New("cannot use --show-builtin-errors with --strict-builtin-errors, --strict-builtin-errors will return the first built-in error encountered immediately")
 		}
 	}
 
@@ -655,8 +708,10 @@ func setupEval(args []string, params evalCommandParams) (*evalContext, error) {
 		regoArgs = append(regoArgs, rego.BuiltinErrorList(&builtInErrors))
 	}
 
-	if params.capabilities != nil {
+	if params.capabilities.C != nil {
 		regoArgs = append(regoArgs, rego.Capabilities(params.capabilities.C))
+	} else {
+		regoArgs = append(regoArgs, rego.Capabilities(ast.CapabilitiesForThisVersion(ast.CapabilitiesRegoVersion(params.regoVersion()))))
 	}
 
 	if params.strict {
@@ -733,7 +788,7 @@ func newrepeatedStringFlag(val []string) repeatedStringFlag {
 	}
 }
 
-func (f *repeatedStringFlag) Type() string {
+func (*repeatedStringFlag) Type() string {
 	return stringType
 }
 
@@ -763,7 +818,7 @@ func newIntFlag(val int) intFlag {
 	}
 }
 
-func (f *intFlag) Type() string {
+func (*intFlag) Type() string {
 	return "int"
 }
 
@@ -828,7 +883,7 @@ func generateOptimizedBundle(params evalCommandParams, asBundle bool, filter loa
 	if params.capabilities.C != nil {
 		capabilities = params.capabilities.C
 	} else {
-		capabilities = ast.CapabilitiesForThisVersion()
+		capabilities = ast.CapabilitiesForThisVersion(ast.CapabilitiesRegoVersion(params.regoVersion()))
 	}
 
 	compiler := compile.New().
@@ -840,7 +895,8 @@ func generateOptimizedBundle(params evalCommandParams, asBundle bool, filter loa
 		WithEntrypoints(params.entrypoints.v...).
 		WithRegoAnnotationEntrypoints(true).
 		WithPaths(paths...).
-		WithFilter(filter)
+		WithFilter(filter).
+		WithRegoVersion(params.regoVersion())
 
 	err := compiler.Build(context.Background())
 	if err != nil {

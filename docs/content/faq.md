@@ -52,8 +52,8 @@ mean the same thing whichever order you write them in.
 ```live:unordered:module:openable
 package unordered
 
-ratelimit := 4 { input.name == "alice" }
-ratelimit := 5 { input.name == "bob" }
+ratelimit := 4 if input.name == "alice"
+ratelimit := 5 if input.name == "bob"
 ```
 
 ```live:unordered:input
@@ -74,9 +74,9 @@ Sometimes, though, you want the statement order to matter.  For example, you mig
 ```live:ordered:module:openable
 package ordered
 
-ratelimit := 4 {
+ratelimit := 4 if {
     input.owner == "bob"
-} else := 5 {
+} else := 5 if {
     input.name == "alice"
 }
 ```
@@ -165,7 +165,7 @@ One is the *function*, which is conceptually identical to functions from most pr
 ```live:functions:module:openable
 package functions
 
-trim_and_split(s) := result {
+trim_and_split(s) := result if {
      t := trim(s, " ")
      result := split(t, ".")
 }
@@ -183,7 +183,7 @@ The other way to factor out common logic is with a *rule*.  Rules differ in that
 ```live:rules:module:openable
 package rules
 
-app_to_hostnames[app_name] := hostnames {
+app_to_hostnames[app_name] := hostnames if {
   app := apps[_]
   app_name := app.name
   hostnames := [hostname | name := app.servers[_]
@@ -407,10 +407,12 @@ Depending on the use case and the integration with OPA that you are using, the s
 **Default allow**.  This style of policy allows every request by default.  The rules you write dictate which requests should be rejected.
 
 ```rego
+package example
+
 # entry point is 'deny'
 default deny := false
-deny { ... }
-deny { ... }
+deny if { ... }
+deny if { ... }
 ```
 
 If you assume all of the rules you write are correct, then you know that every rejection the policy produces should truly be rejected.  However, there could be requests that are allowed that you may not truly want allowed, but you simply neglected to write the rule for.  For operations, this is often a useful style of policy authoring because it allows you to incrementally tighten the controls for a system from wherever that system starts.  For security, this style is less appropriate because it allows unknown bad actions to occur.
@@ -418,10 +420,12 @@ If you assume all of the rules you write are correct, then you know that every r
 **Default deny**.  This style of policy rejects every request by default.  The rules you write dictate which requests should be allowed.
 
 ```rego
+package example
+
 # entry point is 'allow'
 default allow := false
-allow { ... }
-allow { ... }
+allow if { ... }
+allow if { ... }
 ```
 
 If you assume your rules are correct, the only requests that are accepted are known to be safe.  Any statements you leave out reject requests that in actuality are safe but which you did not know were safe.  For operations, these policies are less suitable for incrementally improving the policy posture of a system because the initial policy must explicitly allow all of the behaviors that are necessary for the system to operate correctly.  For security, these policies ensure that any request that is allowed is known to be safe (because there is a rule saying it is safe).
@@ -429,14 +433,16 @@ If you assume your rules are correct, the only requests that are accepted are kn
 **Default allow with deny override**.  This style of policy rejects every request by default.  You write  rules that dictate which requests should be allowed, and optionally you write other rules that dictate which of those allowed requests should be rejected.
 
 ```rego
+package example
+
 # entry point is 'authz'
 default authz := false
-authz {
+authz if {
   allow
   not deny
 }
-allow { ... }
-deny { ... }
+allow if { ... }
+deny if { ... }
 ```
 
 This hybrid approach to policy authoring combines the two previous styles.  These policies allow relatively coarse grained parts of the request space and then carve out of each part what should actually be denied.  Any deny statements that you forget lead to security problems; any allow statements you forget lead to operational problems.  But since this approach allows you to implement either of the other two, it is a common pattern across use cases.

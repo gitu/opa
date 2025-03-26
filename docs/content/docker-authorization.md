@@ -97,13 +97,13 @@ decision_logs:
   console: true
 ```
 
-Save the above file as `config.yaml`. We'll need to place this somewhere where the plugin can find it.
+Save the above file as `opa-config.yaml`. We'll need to place this somewhere where the plugin can find it.
 The `/etc/docker` directory will be mounted as `/opa` in the container running the plugin, so let's create a
 sub-directory for our configuration file there.
 
 ```shell
 sudo mkdir -p /etc/docker/config
-sudo mv config.yaml /etc/docker/config/
+sudo mv opa-config.yaml /etc/docker/config/
 ```
 
 ### 3. Install the opa-docker-authz plugin.
@@ -111,7 +111,7 @@ sudo mv config.yaml /etc/docker/config/
 Install the `opa-docker-authz` plugin and point it to the config file just created.
 
 ```shell
-docker plugin install openpolicyagent/opa-docker-authz-v2:0.8 opa-args="-config-file /opa/config/config.yaml"
+docker plugin install openpolicyagent/opa-docker-authz-v2:0.9 opa-args="-config-file /opa/config/opa-config.yaml"
 ```
 
 You need to configure the Docker daemon to use the plugin for authorization.
@@ -119,7 +119,7 @@ You need to configure the Docker daemon to use the plugin for authorization.
 ```shell
 cat > /etc/docker/daemon.json <<EOF
 {
-    "authorization-plugins": ["openpolicyagent/opa-docker-authz-v2:0.8"]
+    "authorization-plugins": ["openpolicyagent/opa-docker-authz-v2:0.9"]
 }
 EOF
 ```
@@ -191,18 +191,18 @@ package docker.authz
 
 default allow := false
 
-allow {
-    not deny
+allow if {
+	not deny
 }
 
-deny {
-    seccomp_unconfined
+deny if {
+	seccomp_unconfined
 }
 
-seccomp_unconfined {
-    # This expression asserts that the string on the right-hand side is equal
-    # to an element in the array SecurityOpt referenced on the left-hand side.
-    input.Body.HostConfig.SecurityOpt[_] == "seccomp:unconfined"
+seccomp_unconfined if {
+	# This expression asserts that the string on the right-hand side is equal
+	# to an element in the array SecurityOpt referenced on the left-hand side.
+	input.Body.HostConfig.SecurityOpt[_] == "seccomp:unconfined"
 }
 ```
 
@@ -392,24 +392,24 @@ package docker.authz
 default allow := false
 
 # allow if the user is granted read/write access.
-allow {
-    user_id := input.Headers["Authz-User"]
-    user := users[user_id]
-    not user.readOnly
+allow if {
+	user_id := input.Headers["Authz-User"]
+	user := users[user_id]
+	not user.readOnly
 }
 
 # allow if the user is granted read-only access and the request is a GET.
-allow {
-    user_id := input.Headers["Authz-User"]
-    users[user_id].readOnly
-    input.Method == "GET"
+allow if {
+	user_id := input.Headers["Authz-User"]
+	users[user_id].readOnly
+	input.Method == "GET"
 }
 
 # users defines permissions for the user. In this case, we define a single
 # attribute 'readOnly' that controls the kinds of commands the user can run.
 users := {
-    "bob": {"readOnly": true},
-    "alice": {"readOnly": false},
+	"bob": {"readOnly": true},
+	"alice": {"readOnly": false},
 }
 ```
 

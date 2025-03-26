@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/open-policy-agent/opa/logging"
+	"github.com/open-policy-agent/opa/v1/logging"
 )
 
 func TestECR(t *testing.T) {
@@ -21,7 +21,7 @@ func TestECR(t *testing.T) {
 			}
 		]
 	}`
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		if _, err := io.WriteString(w, payload); err != nil {
 			t.Fatalf("io.WriteString(w, payload) = %v", err)
 		}

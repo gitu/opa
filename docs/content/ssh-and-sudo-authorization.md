@@ -169,8 +169,8 @@ import data.hosts
 default allow := false
 
 # Allow access to any user that has the "admin" role.
-allow {
-    data.roles["admin"][_] == input.sysinfo.pam_username
+allow if {
+	data.roles.admin[_] == input.sysinfo.pam_username
 }
 
 # Allow access to any user who contributed to the code running on the host.
@@ -181,13 +181,13 @@ allow {
 #
 # It then compares all the contributors for that host against the username
 # that is asking for authorization.
-allow {
-    hosts[pull_responses.files["/etc/host_identity.json"].host_id].contributors[_] == sysinfo.pam_username
+allow if {
+	hosts[pull_responses.files["/etc/host_identity.json"].host_id].contributors[_] == sysinfo.pam_username
 }
 
 # If the user is not authorized, then include an error message in the response.
-errors["Request denied by administrative policy"] {
-    not allow
+errors contains "Request denied by administrative policy" if {
+	not allow
 }
 ```
 
@@ -204,13 +204,13 @@ package sudo.authz
 default allow := false
 
 # Allow access to any user that has the "admin" role.
-allow {
-    data.roles["admin"][_] == input.sysinfo.pam_username
+allow if {
+	data.roles.admin[_] == input.sysinfo.pam_username
 }
 
 # If the user is not authorized, then include an error message in the response.
-errors["Request denied by administrative policy"] {
-    not allow
+errors contains "Request denied by administrative policy" if {
+	not allow
 }
 ```
 
@@ -372,13 +372,13 @@ Then we need to make sure that the authorization takes this input into account.
 package sudo.authz
 
 import data.elevate
-import input.sysinfo
 import input.display_responses
+import input.sysinfo
 
 # Allow this user if the elevation ticket they provided matches our mock API
 # of an internal elevation system.
-allow {
-    elevate.tickets[sysinfo.pam_username] == display_responses.ticket
+allow if {
+	elevate.tickets[sysinfo.pam_username] == display_responses.ticket
 }
 ```
 

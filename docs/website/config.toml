@@ -1,7 +1,7 @@
 title = "Open Policy Agent"
 baseURL = "https://www.openpolicyagent.org"
 languageCode = "en"
-disableKinds = ["taxonomy", "taxonomyTerm"]
+disableKinds = ["taxonomy"]
 
 pygmentsCodeFences = true
 pygmentsUseClasses = false
@@ -10,7 +10,7 @@ pygmentsGuessSyntax = true
 
 # Don't try and render the code snippets as html pages
 # the are loaded via shortcode helpers.
-ignorefiles = [ "/docs/v.*/code/.*" ]
+ignorefiles = ["/docs/v.*/code/.*"]
 
 [markup]
 [markup.goldmark]
@@ -26,7 +26,7 @@ GithubEdit = "https://github.com/open-policy-agent/opa/edit/main/docs/content/"
 [params.social]
 twitter = "OpenPolicyAgent"
 medium = "https://blog.openpolicyagent.org"
-slack = "https://slack.openpolicyagent.org"
+slack = "https://inviter.co/opa"
 github = "https://github.com/open-policy-agent/opa"
 discussions = "https://github.com/open-policy-agent/feedback/discussions"
 

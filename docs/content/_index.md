@@ -127,7 +127,6 @@ at some point in time, but have been introduced gradually.
 
 ```live:example/refs:module:hidden
 package example
-import future.keywords
 ```
 
 When OPA evaluates policies it binds data provided in the query to a global
@@ -164,7 +163,6 @@ input.deadbeef
 
 ```live:example/exprs:module:hidden
 package example
-import future.keywords
 ```
 
 To produce policy decisions in Rego you write expressions against input and
@@ -223,7 +221,6 @@ input.servers[0].protocols[0] == "telnet"
 
 ```live:example/vars:module:hidden
 package example
-import future.keywords
 ```
 
 You can store values in intermediate variables using the `:=` (assignment)
@@ -275,7 +272,6 @@ x != y  # y has not been assigned a value
 
 ```live:example/iter:module:hidden
 package example
-import future.keywords
 ```
 
 Like other declarative languages (e.g., SQL), iteration in Rego happens
@@ -375,19 +371,6 @@ some i; input.servers[i].protocols[i] == "ssh"  # there is no assignment of i th
 While plain iteration serves as a powerful building block, Rego also features ways
 to express _FOR SOME_ and _FOR ALL_ more explicitly.
 
-{{< info >}}
-To ensure backwards-compatibility, the keywords discussed below introduced slowly.
-In the first stage, users can opt-in to using the new keywords via a special import:
-`import future.keywords.every` introduces the `every` keyword described here.
-(Importing `every` means also importing `in` without an extra `import` statement.)
-
-At some point in the future, the keyword will become _standard_, and the import will
-become a no-op that can safely be removed. This should give all users ample time to
-update their policies, so that the new keyword will not cause clashes with existing
-variable names.
-[See the docs on _future keywords_](./policy-language/#future-keywords) for more information.
-{{< /info >}}
-
 ##### FOR SOME (`some`)
 
 `some ... in ...` is used to iterate over the collection (its last argument),
@@ -482,7 +465,6 @@ logic statements. Rules can either be "complete" or "partial".
 
 ```live:example/complete:module:hidden
 package example.rules
-import future.keywords
 ```
 
 #### Complete Rules
@@ -573,7 +555,6 @@ any_public_networks
 
 ```live:example/partial_set:module:hidden
 package example
-import future.keywords
 ```
 
 Partial rules are if-then statements that generate a set of values and
@@ -586,8 +567,8 @@ public_network contains net.id if {
 }
 ```
 
-In the example above `public_network[net.id]` is the rule head and `net :=
-input.networks[_]; net.public` is the rule body. You can query for the entire
+In the example above `public_network contains net.id if` is the rule head and
+`some net in input.networks; net.public` is the rule body. You can query for the entire
 set of values just like any other value:
 
 ```live:example/partial_set/1/extent:query:merge_down
@@ -651,12 +632,12 @@ package example.logical_or
 
 default shell_accessible := false
 
-shell_accessible := true {
-    input.servers[_].protocols[_] == "telnet"
+shell_accessible if {
+	input.servers[_].protocols[_] == "telnet"
 }
 
-shell_accessible := true {
-    input.servers[_].protocols[_] == "ssh"
+shell_accessible if {
+	input.servers[_].protocols[_] == "ssh"
 }
 ```
 ```live:example/logical_or/complete:input:merge_down
@@ -690,14 +671,14 @@ could be modified to generate a set of servers that expose `"telnet"` or
 ```live:example/logical_or/partial_set:module:openable,merge_down
 package example.logical_or
 
-shell_accessible[server.id] {
-    server := input.servers[_]
-    server.protocols[_] == "telnet"
+shell_accessible contains server.id if {
+	server := input.servers[_]
+	server.protocols[_] == "telnet"
 }
 
-shell_accessible[server.id] {
-    server := input.servers[_]
-    server.protocols[_] == "ssh"
+shell_accessible contains server.id if {
+	server := input.servers[_]
+	server.protocols[_] == "ssh"
 }
 ```
 ```live:example/logical_or/partial_set:input:merge_down
@@ -725,8 +706,8 @@ shell_accessible
 ```
 
 {{< info >}}
-💡 there's a [blog post](https://www.styra.com/blog/how-to-express-or-in-rego/) that goes into much more detail
-on this topic showing different methods express OR in idiomatic Rego for different use cases.
+💡 There's a [blog post](https://www.styra.com/blog/how-to-express-or-in-rego/) that goes into much more detail
+on this topic showing different methods to express OR in idiomatic Rego for different use cases.
 {{< /info >}}
 
 <!---TBD: explain conflicts --->
@@ -748,23 +729,22 @@ For example:
 
 ```live:example/final:module:openable,merge_down
 package example
-import future.keywords.every # "every" implies "in"
 
-allow := true {                                     # allow is true if...
+allow if {                                          # allow is true if...
     count(violation) == 0                           # there are zero violations.
 }
 
-violation[server.id] {                              # a server is in the violation set if...
+violation contains server.id if {                   # a server is in the violation set if...
     some server in public_servers                   # it exists in the 'public_servers' set and...
     "http" in server.protocols                      # it contains the insecure "http" protocol.
 }
 
-violation[server.id] {                              # a server is in the violation set if...
+violation contains server.id if {                   # a server is in the violation set if...
     some server in input.servers                    # it exists in the input.servers collection and...
     "telnet" in server.protocols                    # it contains the "telnet" protocol.
 }
 
-public_servers[server] {                            # a server exists in the public_servers set if...
+public_servers contains server if {                 # a server exists in the public_servers set if...
     some server in input.servers                    # it exists in the input.servers collection and...
 
     some port in server.ports                       # it references a port in the input.ports collection and...
@@ -789,12 +769,19 @@ your own machine.
 
 ### 1. Download OPA
 
-To get started download an OPA binary for your platform from GitHub releases:
+To get started download an OPA binary for your platform from
+[GitHub releases](https://github.com/open-policy-agent/opa/releases):
 
-On macOS (64-bit):
+On macOS (ARM 64-bit):
 
 ```shell
-curl -L -o opa https://openpolicyagent.org/downloads/{{< current_version >}}/opa_darwin_amd64
+curl -L -o opa https://openpolicyagent.org/downloads/{{< current_version >}}/opa_darwin_arm64_static
+```
+
+Or using Homebrew:
+
+```shell
+brew install opa
 ```
 
 On Linux (64-bit):
@@ -805,8 +792,8 @@ curl -L -o opa https://openpolicyagent.org/downloads/{{< current_version >}}/opa
 
 {{< info >}}
 Windows users can obtain the OPA executable from [here](https://openpolicyagent.org/downloads/{{< current_version >}}/opa_windows_amd64.exe).
-The steps below are the same for Windows users except the executable name will be different.  
-Windows executable file name is opa_windows_amd64.exe, which inclues file extension name 'exe'. The checksums file name is opa_windows_amd64.exe.sha256.  
+The steps below are the same for Windows users except the executable name will be different.
+Windows executable file name is opa_windows_amd64.exe, which inclues file extension name 'exe'. The checksums file name is opa_windows_amd64.exe.sha256.
 Windows users can obtain the checksums from [here](https://openpolicyagent.org/downloads/{{< current_version >}}/opa_windows_amd64.exe.sha256).
 {{< /info >}}
 
@@ -882,22 +869,22 @@ package example
 
 default allow := false                              # unless otherwise defined, allow is false
 
-allow := true {                                     # allow is true if...
+allow if {                                          # allow is true if...
     count(violation) == 0                           # there are zero violations.
 }
 
-violation[server.id] {                              # a server is in the violation set if...
+violation contains server.id if {                   # a server is in the violation set if...
     some server
-    public_server[server]                           # it exists in the 'public_server' set and...
+    public_servers[server]                           # it exists in the 'public_servers' set and...
     server.protocols[_] == "http"                   # it contains the insecure "http" protocol.
 }
 
-violation[server.id] {                              # a server is in the violation set if...
+violation contains server.id if {                   # a server is in the violation set if...
     server := input.servers[_]                      # it exists in the input.servers collection and...
     server.protocols[_] == "telnet"                 # it contains the "telnet" protocol.
 }
 
-public_server[server] {                             # a server exists in the public_server set if...
+public_servers contains server if {                  # a server exists in the 'public_servers' set if...
     some i, j
     server := input.servers[_]                      # it exists in the input.servers collection and...
     server.ports[_] == input.ports[i].id            # it references a port in the input.ports collection and...
@@ -953,7 +940,7 @@ follows:
 > pi := 3.14
 ```
 
-Once "pi" is defined, you query for the value and write expressions in terms of
+Once `pi` is defined, you query for the value and write expressions in terms of
 it:
 
 ```ruby
@@ -995,7 +982,7 @@ opa run example.rego repl.input:input.json
 ```
 
 ```ruby
-> data.example.public_server[s]
+> data.example.public_servers[s]
 ```
 
 {{< info >}}
@@ -1020,10 +1007,9 @@ You can start OPA as a server with `-s` or `--server`:
 ./opa run --server ./example.rego
 ```
 
-By default OPA listens for HTTP connections on `0.0.0.0:8181`. See `opa run
+By default OPA listens for HTTP connections on `localhost:8181`. See `opa run
 --help` for a list of options to change the listening address, enable TLS, and
-more. For example, if the `--v1-compatible` flag is set, OPA will listen
-for HTTP connections on `localhost:8181` by default.
+more.
 
 Inside of another terminal use `curl` (or a similar tool) to access OPA's HTTP
 API. When you query the `/v1/data` HTTP API you must wrap input data inside of a

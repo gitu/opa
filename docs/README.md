@@ -173,8 +173,8 @@ In this module:
 ```live:rule_body:module
 package example
 
-u {
-  "foo" == "foo"
+u if {
+	"foo" == "foo"
 }
 ```
 
@@ -205,7 +205,7 @@ package example
 We can define a scalar rule:
 
 ```live:eg/string:module
-string = "hello"
+string := "hello"
 ```
 
 Which generates the document you'd expect:
@@ -216,7 +216,7 @@ Which generates the document you'd expect:
 We can then define a rule that uses the value of `string`:
 
 ```live:eg/string/rule:module
-r { input.value == string }
+r if { input.value == string }
 ```
 
 And query it with some input:
@@ -241,7 +241,7 @@ In that example, the output for `eg/string` is evaluated with only the module:
 ```
 package example
 
-string = "hello"
+string := "hello"
 ```
 
 Whereas the `eg/string/rule` output is evaluated with the module:
@@ -249,9 +249,9 @@ Whereas the `eg/string/rule` output is evaluated with the module:
 ```
 package example
 
-string = "hello"
+string := "hello"
 
-r { input.value == string }
+r if input.value == string
 ```
 
 as well the given query and input.

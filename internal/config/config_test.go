@@ -14,7 +14,7 @@ import (
 
 	"sigs.k8s.io/yaml"
 
-	"github.com/open-policy-agent/opa/util/test"
+	"github.com/open-policy-agent/opa/v1/util/test"
 )
 
 func setTestEnvVar(t *testing.T, name, value string) string {
@@ -306,12 +306,12 @@ discovery:
 `}
 
 	test.WithTempFS(fs, func(rootDir string) {
-		configFile := filepath.Join(rootDir, "/some/config.yaml")
+		configFile := filepath.Join(rootDir, "some", "config.yaml")
 		configOverrides := []string{"services.acmecorp.credentials.bearer.token=bGFza2RqZmxha3NkamZsa2Fqc2Rsa2ZqYWtsc2RqZmtramRmYWxkc2tm"}
 
 		configBytes, err := Load(configFile, configOverrides, nil)
 		if err != nil {
-			t.Errorf("unexpected error loading config: " + err.Error())
+			t.Errorf("unexpected error loading config: %s", err.Error())
 		}
 
 		config := map[string]interface{}{}
@@ -361,13 +361,13 @@ discovery:
 	}
 
 	test.WithTempFS(fs, func(rootDir string) {
-		configFile := filepath.Join(rootDir, "/some/config.yaml")
-		secretFile := filepath.Join(rootDir, "/some/secret.txt")
-		overrideFiles := []string{fmt.Sprintf("services.acmecorp.credentials.bearer.token=%s", secretFile)}
+		configFile := filepath.Join(rootDir, "some", "config.yaml")
+		secretFile := filepath.Join(rootDir, "some", "secret.txt")
+		overrideFiles := []string{"services.acmecorp.credentials.bearer.token=" + secretFile}
 
 		configBytes, err := Load(configFile, nil, overrideFiles)
 		if err != nil {
-			t.Errorf("unexpected error loading config: " + err.Error())
+			t.Errorf("unexpected error loading config: %s", err.Error())
 		}
 
 		config := map[string]interface{}{}
@@ -409,7 +409,7 @@ func TestLoadConfigWithParamOverrideNoConfigFile(t *testing.T) {
 
 	configBytes, err := Load("", configOverrides, nil)
 	if err != nil {
-		t.Errorf("unexpected error loading config: " + err.Error())
+		t.Errorf("unexpected error loading config: %s", err.Error())
 	}
 
 	config := map[string]interface{}{}
@@ -451,7 +451,7 @@ func TestLoadConfigWithParamOverrideNoConfigFileWithEmptyObject(t *testing.T) {
 
 	configBytes, err := Load("", configOverrides, nil)
 	if err != nil {
-		t.Errorf("unexpected error loading config: " + err.Error())
+		t.Errorf("unexpected error loading config: %s", err.Error())
 	}
 
 	config := map[string]interface{}{}

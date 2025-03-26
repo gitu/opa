@@ -13,17 +13,31 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/open-policy-agent/opa/ast"
-	"github.com/open-policy-agent/opa/format"
+	"github.com/open-policy-agent/opa/cmd/internal/env"
 	fileurl "github.com/open-policy-agent/opa/internal/file/url"
-	"github.com/open-policy-agent/opa/loader"
-	"github.com/open-policy-agent/opa/refactor"
+	"github.com/open-policy-agent/opa/v1/ast"
+	"github.com/open-policy-agent/opa/v1/format"
+	"github.com/open-policy-agent/opa/v1/loader"
+	"github.com/open-policy-agent/opa/v1/refactor"
 )
 
 type moveCommandParams struct {
-	mapping   repeatedStringFlag
-	ignore    []string
-	overwrite bool
+	mapping      repeatedStringFlag
+	ignore       []string
+	overwrite    bool
+	v0Compatible bool
+	v1Compatible bool
+}
+
+func (m *moveCommandParams) regoVersion() ast.RegoVersion {
+	// v0 takes precedence over v1
+	if m.v0Compatible {
+		return ast.RegoV0
+	}
+	if m.v1Compatible {
+		return ast.RegoV1
+	}
+	return ast.DefaultRegoVersion
 }
 
 func init() {
@@ -69,10 +83,13 @@ The 'move' command outputs the below policy to stdout with the package name rewr
 | default allow = false   |
 | _ _ _ _ _ _ _ _ _ _ _ _ | 
 `,
-		PreRunE: func(_ *cobra.Command, args []string) error {
-			return validateMoveArgs(args)
+		PreRunE: func(cmd *cobra.Command, args []string) error {
+			if err := validateMoveArgs(args); err != nil {
+				return err
+			}
+			return env.CmdFlags.CheckEnvironmentVariables(cmd)
 		},
-		Run: func(cmd *cobra.Command, args []string) {
+		Run: func(_ *cobra.Command, args []string) {
 			if err := doMove(moveCommandParams, args, os.Stdout); err != nil {
 				fmt.Fprintln(os.Stderr, "error:", err)
 				os.Exit(1)
@@ -84,6 +101,8 @@ The 'move' command outputs the below policy to stdout with the package name rewr
 	moveCommand.Flags().BoolVarP(&moveCommandParams.overwrite, "write", "w", false, "overwrite the original source file")
 	addIgnoreFlag(moveCommand.Flags(), &moveCommandParams.ignore)
 	refactorCommand.AddCommand(moveCommand)
+	addV0CompatibleFlag(moveCommand.Flags(), &moveCommandParams.v0Compatible, false)
+	addV1CompatibleFlag(moveCommand.Flags(), &moveCommandParams.v1Compatible, false)
 	RootCommand.AddCommand(refactorCommand)
 }
 
@@ -103,7 +122,9 @@ func doMove(params moveCommandParams, args []string, out io.Writer) error {
 		Ignore: params.ignore,
 	}
 
-	result, err := loader.NewFileLoader().Filtered(args, f.Apply)
+	result, err := loader.NewFileLoader().
+		WithRegoVersion(params.regoVersion()).
+		Filtered(args, f.Apply)
 	if err != nil {
 		return err
 	}
@@ -128,7 +149,7 @@ func doMove(params moveCommandParams, args []string, out io.Writer) error {
 			return err
 		}
 
-		formatted, err := format.Ast(mod)
+		formatted, err := format.AstWithOpts(mod, format.Opts{RegoVersion: params.regoVersion()})
 		if err != nil {
 			return newError("failed to parse Rego source file: %v", err)
 		}

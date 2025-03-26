@@ -21,7 +21,11 @@ weight: 90
 restrictedtoc: true
 ---
 
-The OPA executable provides the following commands.
+The OPA executable provides the following commands. Note that command line arguments may either be provided as
+traditional flags, or as environment variables. The expected format of environment variables used for this purpose
+follows the pattern OPA_<COMMAND>_<FLAG> where COMMAND is the command name in uppercase (like EVAL) and FLAG is the
+flag name in uppercase (like STRICT), i.e. OPA_EVAL_STRICT would be equivalent to passing the --strict flag to the
+eval command.
 
 `
 
@@ -43,7 +47,7 @@ func main() {
 
 	err = doc.GenMarkdownTree(command, dir)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatal(err) //nolint: gocritic
 	}
 
 	files, err := os.ReadDir(dir)
@@ -84,7 +88,7 @@ func main() {
 			removed++
 			continue
 		}
-		document = append(document, fmt.Sprintf("%s\n", str))
+		document = append(document, str+"\n")
 	}
 
 	withHeader := fmt.Sprintf("%s%s", fileHeader, strings.Join(document, ""))

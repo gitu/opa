@@ -6,15 +6,15 @@ package cmd
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
-	"github.com/open-policy-agent/opa/bundle"
 	"github.com/open-policy-agent/opa/internal/file/archive"
-	"github.com/open-policy-agent/opa/keys"
-	"github.com/open-policy-agent/opa/util/test"
+	"github.com/open-policy-agent/opa/v1/bundle"
+	"github.com/open-policy-agent/opa/v1/keys"
+	"github.com/open-policy-agent/opa/v1/util/test"
 )
 
 func TestWriteTokenToFile(t *testing.T) {
@@ -96,7 +96,7 @@ func TestBundleSignVerification(t *testing.T) {
 
 		// create gzipped tarball
 		var filesInBundle [][2]string
-		err = filepath.Walk(rootDir, func(path string, info os.FileInfo, err error) error {
+		err = filepath.Walk(rootDir, func(path string, info os.FileInfo, _ error) error {
 			if !info.IsDir() {
 				bs, err := os.ReadFile(path)
 				if err != nil {
@@ -139,22 +139,22 @@ func TestValidateSignParams(t *testing.T) {
 		"no_args": {
 			[]string{},
 			newSignCmdParams(),
-			true, fmt.Errorf("specify atleast one path containing policy and/or data files"),
+			true, errors.New("specify atleast one path containing policy and/or data files"),
 		},
 		"no_signing_key": {
 			[]string{"foo"},
 			newSignCmdParams(),
-			true, fmt.Errorf("specify the secret (HMAC) or path of the PEM file containing the private key (RSA and ECDSA)"),
+			true, errors.New("specify the secret (HMAC) or path of the PEM file containing the private key (RSA and ECDSA)"),
 		},
 		"empty_signing_key": {
 			[]string{"foo"},
 			signCmdParams{key: "", bundleMode: true},
-			true, fmt.Errorf("specify the secret (HMAC) or path of the PEM file containing the private key (RSA and ECDSA)"),
+			true, errors.New("specify the secret (HMAC) or path of the PEM file containing the private key (RSA and ECDSA)"),
 		},
 		"non_bundle_mode": {
 			[]string{"foo"},
 			signCmdParams{key: "foo"},
-			true, fmt.Errorf("enable bundle mode (ie. --bundle) to sign bundle files or directories"),
+			true, errors.New("enable bundle mode (ie. --bundle) to sign bundle files or directories"),
 		},
 		"no_error": {
 			[]string{"foo"},
@@ -176,10 +176,8 @@ func TestValidateSignParams(t *testing.T) {
 				if tc.err != nil && tc.err.Error() != err.Error() {
 					t.Fatalf("Expected error message %v but got %v", tc.err.Error(), err.Error())
 				}
-			} else {
-				if err != nil {
-					t.Fatalf("Unexpected error %v", err)
-				}
+			} else if err != nil {
+				t.Fatalf("Unexpected error %v", err)
 			}
 		})
 	}

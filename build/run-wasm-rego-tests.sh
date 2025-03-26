@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
 # This script executes the Wasm Rego test cases. The script uses Docker to run
-# the test generation progam and then again to run the test cases inside of a
-# Node JS container. The script cachces the test generation program build
+# the test generation program and then again to run the test cases inside of a
+# Node JS container. The script caches the test generation program build
 # results in the $PWD/.go directory so that it can be re-used across runs. The
 # volumes from the test generation container are shared with the Node JS
 # container to avoid copying the generated test cases more than necessary.
@@ -10,17 +10,24 @@
 set -ex
 
 GOVERSION=${GOVERSION:?"You must set the GOVERSION environment variable."}
-ASSETS=${ASSETS:-"$PWD/test/wasm/assets"}
+DOCKER_UID=${DOCKER_UID:-$(id -u)}
+DOCKER_GID=${DOCKER_GID:-$(id -g)}
+ASSETS=${ASSETS:-"$PWD/v1/test/wasm/assets"}
 VERBOSE=${VERBOSE:-"0"}
 TESTGEN_CONTAINER_NAME="opa-wasm-testgen-container"
 TESTRUN_CONTAINER_NAME="opa-wasm-testrun-container"
+WASM_BUILD_ONLY=${WASM_BUILD_ONLY:-"false"}
 
 function main {
     trap interrupt SIGINT SIGTERM
     mkdir -p $PWD/.go/cache/go-build
     mkdir -p $PWD/.go/bin
     generate_testcases
-    run_testcases
+    if [[ "${WASM_BUILD_ONLY}" != "true" ]]; then
+        run_testcases
+    else
+        echo "Running wasm tests disabled by environment variable."
+    fi
 }
 
 function interrupt {
@@ -44,17 +51,17 @@ function generate_testcases {
     purge_testgen_container
     docker run \
         --name $TESTGEN_CONTAINER_NAME \
-        -u $(id -u):$(id -g) \
+        -u $DOCKER_UID:$DOCKER_GID \
         -v $PWD/.go/bin:/go/bin:Z \
         -v $PWD:/src:z \
         -v $ASSETS:/assets:Z \
         -e GOCACHE=/src/.go/cache \
         -w /src \
         golang:$GOVERSION \
-        sh -c 'make wasm-rego-testgen-install \
+        sh -c 'git config --global --add safe.directory /src && make wasm-rego-testgen-install \
                 && wasm-rego-testgen \
                 --input-dir=/assets \
-                --runner=/src/test/wasm/assets/test.js \
+                --runner=/src/v1/test/wasm/assets/test.js \
                 --output=/src/.go/cache/testcases.tar.gz'
 }
 

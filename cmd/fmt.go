@@ -14,19 +14,40 @@ import (
 	"github.com/sergi/go-diff/diffmatchpatch"
 	"github.com/spf13/cobra"
 
-	"github.com/open-policy-agent/opa/format"
+	"github.com/open-policy-agent/opa/cmd/internal/env"
 	fileurl "github.com/open-policy-agent/opa/internal/file/url"
+	"github.com/open-policy-agent/opa/v1/ast"
+	"github.com/open-policy-agent/opa/v1/format"
 )
 
 type fmtCommandParams struct {
-	overwrite bool
-	list      bool
-	diff      bool
-	fail      bool
-	regoV1    bool
+	overwrite     bool
+	list          bool
+	diff          bool
+	fail          bool
+	regoV1        bool
+	v0Compatible  bool
+	v1Compatible  bool
+	checkResult   bool
+	dropV0Imports bool
 }
 
 var fmtParams = fmtCommandParams{}
+
+func (p *fmtCommandParams) regoVersion() ast.RegoVersion {
+	// The '--rego-v1' flag takes precedence over the '--v1-compatible' flag.
+	if p.regoV1 {
+		return ast.RegoV0CompatV1
+	}
+	// The '--v0-compatible' flag takes precedence over the '--v1-compatible' flag.
+	if p.v0Compatible {
+		return ast.RegoV0
+	}
+	if p.v1Compatible {
+		return ast.RegoV1
+	}
+	return ast.DefaultRegoVersion
+}
 
 var formatCommand = &cobra.Command{
 	Use:   "fmt [path [...]]",
@@ -38,7 +59,7 @@ is provided - this tool will use stdin.
 The format of the output is not defined specifically; whatever this tool outputs
 is considered correct format (with the exception of bugs).
 
-If the '-w' option is supplied, the 'fmt' command with overwrite the source file
+If the '-w' option is supplied, the 'fmt' command will overwrite the source file
 instead of printing to stdout.
 
 If the '-d' option is supplied, the 'fmt' command will output a diff between the
@@ -49,14 +70,35 @@ that would change if formatted. The '-l' option will suppress any other output
 to stdout from the 'fmt' command.
 
 If the '--fail' option is supplied, the 'fmt' command will return a non zero exit
-code if a file would be reformatted.`,
-	Run: func(cmd *cobra.Command, args []string) {
+code if a file would be reformatted.
+
+The 'fmt' command can be run in several compatibility modes for consuming and outputting
+different Rego versions:
+
+* ` + "`" + `opa fmt` + "`" + `:
+  * v1 Rego is formatted to v1
+  * ` + "`" + `rego.v1` + "`" + `/` + "`" + `future.keywords` + "`" + ` imports are NOT removed
+  * ` + "`" + `rego.v1` + "`" + `/` + "`" + `future.keywords` + "`" + ` imports are NOT added if missing
+  * v0 rego is rejected
+* ` + "`" + `opa fmt --v0-compatible` + "`" + `:
+  * v0 Rego is formatted to v0
+  * v1 Rego is rejected
+* ` + "`" + `opa fmt --v0-v1` + "`" + `:
+  * v0 Rego is formatted to be compatible with v0 AND v1
+  * v1 Rego is rejected
+* ` + "`" + `opa fmt --v0-v1 --v1-compatible` + "`" + `:
+  * v1 Rego is formatted to be compatible with v0 AND v1
+  * v0 Rego is rejected
+`,
+	PreRunE: func(cmd *cobra.Command, _ []string) error {
+		return env.CmdFlags.CheckEnvironmentVariables(cmd)
+	},
+	Run: func(_ *cobra.Command, args []string) {
 		os.Exit(opaFmt(args))
 	},
 }
 
 func opaFmt(args []string) int {
-
 	if len(args) == 0 {
 		if err := formatStdin(&fmtParams, os.Stdin, os.Stdout); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -109,9 +151,33 @@ func formatFile(params *fmtCommandParams, out io.Writer, filename string, info o
 		return newError("failed to open file: %v", err)
 	}
 
-	formatted, err := format.SourceWithOpts(filename, contents, format.Opts{RegoV1: params.regoV1})
+	opts := format.Opts{
+		RegoVersion:   params.regoVersion(),
+		DropV0Imports: params.dropV0Imports,
+	}
+
+	if params.regoV1 {
+		opts.ParserOptions = &ast.ParserOptions{RegoVersion: ast.RegoV0}
+	}
+
+	if params.v0Compatible {
+		// v0 takes precedence over v1
+		opts.ParserOptions = &ast.ParserOptions{RegoVersion: ast.RegoV0}
+	} else if params.v1Compatible {
+		opts.ParserOptions = &ast.ParserOptions{RegoVersion: ast.RegoV1}
+	}
+
+	formatted, err := format.SourceWithOpts(filename, contents, opts)
 	if err != nil {
 		return newError("failed to format Rego source file: %v", err)
+	}
+
+	if params.checkResult {
+		popts := ast.ParserOptions{RegoVersion: params.regoVersion()}
+		_, err := ast.ParseModuleWithOpts("formatted", string(formatted), popts)
+		if err != nil {
+			return newError("%s was successfully formatted, but the result is invalid: %v\n\nTo inspect the formatted Rego, you can turn off this check with --check-result=false.", filename, err)
+		}
 	}
 
 	changed := !bytes.Equal(contents, formatted)
@@ -164,13 +230,26 @@ func formatFile(params *fmtCommandParams, out io.Writer, filename string, info o
 }
 
 func formatStdin(params *fmtCommandParams, r io.Reader, w io.Writer) error {
-
 	contents, err := io.ReadAll(r)
 	if err != nil {
 		return err
 	}
 
-	formatted, err := format.SourceWithOpts("stdin", contents, format.Opts{RegoV1: params.regoV1})
+	opts := format.Opts{}
+	opts.RegoVersion = params.regoVersion()
+
+	if params.regoV1 {
+		opts.ParserOptions = &ast.ParserOptions{RegoVersion: ast.RegoV0}
+	}
+
+	if params.v0Compatible {
+		// v0 takes precedence over v1
+		opts.ParserOptions = &ast.ParserOptions{RegoVersion: ast.RegoV0}
+	} else if params.v1Compatible {
+		opts.ParserOptions = &ast.ParserOptions{RegoVersion: ast.RegoV1}
+	}
+
+	formatted, err := format.SourceWithOpts("stdin", contents, opts)
 	if err != nil {
 		return err
 	}
@@ -179,9 +258,9 @@ func formatStdin(params *fmtCommandParams, r io.Reader, w io.Writer) error {
 	return err
 }
 
-func doDiff(old, new []byte) (diffString string) {
+func doDiff(a, b []byte) (diffString string) { // "a" is old, "b" is new
 	dmp := diffmatchpatch.New()
-	diffs := dmp.DiffMain(string(old), string(new), false)
+	diffs := dmp.DiffMain(string(a), string(b), false)
 	return dmp.DiffPrettyText(diffs)
 }
 
@@ -206,6 +285,11 @@ func init() {
 	formatCommand.Flags().BoolVarP(&fmtParams.list, "list", "l", false, "list all files who would change when formatted")
 	formatCommand.Flags().BoolVarP(&fmtParams.diff, "diff", "d", false, "only display a diff of the changes")
 	formatCommand.Flags().BoolVar(&fmtParams.fail, "fail", false, "non zero exit code on reformat")
-	formatCommand.Flags().BoolVar(&fmtParams.regoV1, "rego-v1", false, "format as Rego v1")
+	addRegoV0V1FlagWithDescription(formatCommand.Flags(), &fmtParams.regoV1, false, "format module(s) to be compatible with both Rego v0 and v1")
+	addV0CompatibleFlag(formatCommand.Flags(), &fmtParams.v0Compatible, false)
+	addV1CompatibleFlag(formatCommand.Flags(), &fmtParams.v1Compatible, false)
+	formatCommand.Flags().BoolVar(&fmtParams.checkResult, "check-result", true, "assert that the formatted code is valid and can be successfully parsed")
+	formatCommand.Flags().BoolVar(&fmtParams.dropV0Imports, "drop-v0-imports", false, "drop v0 imports from the formatted code, such as 'rego.v1' and 'future.keywords'")
+
 	RootCommand.AddCommand(formatCommand)
 }

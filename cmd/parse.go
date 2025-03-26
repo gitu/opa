@@ -6,6 +6,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,11 +14,12 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/open-policy-agent/opa/ast"
-	astJSON "github.com/open-policy-agent/opa/ast/json"
+	"github.com/open-policy-agent/opa/cmd/internal/env"
 	pr "github.com/open-policy-agent/opa/internal/presentation"
-	"github.com/open-policy-agent/opa/loader"
-	"github.com/open-policy-agent/opa/util"
+	"github.com/open-policy-agent/opa/v1/ast"
+	astJSON "github.com/open-policy-agent/opa/v1/ast/json"
+	"github.com/open-policy-agent/opa/v1/loader"
+	"github.com/open-policy-agent/opa/v1/util"
 )
 
 const (
@@ -26,8 +28,21 @@ const (
 )
 
 type parseParams struct {
-	format      *util.EnumFlag
-	jsonInclude string
+	format       *util.EnumFlag
+	jsonInclude  string
+	v0Compatible bool
+	v1Compatible bool
+}
+
+func (p *parseParams) regoVersion() ast.RegoVersion {
+	// the '--v0--compatible' flag takes precedence over the '--v1-compatible' flag
+	if p.v0Compatible {
+		return ast.RegoV0
+	}
+	if p.v1Compatible {
+		return ast.RegoV1
+	}
+	return ast.DefaultRegoVersion
 }
 
 var configuredParseParams = parseParams{
@@ -39,11 +54,11 @@ var parseCommand = &cobra.Command{
 	Use:   "parse <path>",
 	Short: "Parse Rego source file",
 	Long:  `Parse Rego source file and print AST.`,
-	PreRunE: func(Cmd *cobra.Command, args []string) error {
+	PreRunE: func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 {
-			return fmt.Errorf("no source file specified")
+			return errors.New("no source file specified")
 		}
-		return nil
+		return env.CmdFlags.CheckEnvironmentVariables(cmd)
 	},
 	Run: func(_ *cobra.Command, args []string) {
 		os.Exit(parse(args, &configuredParseParams, os.Stdout, os.Stderr))
@@ -71,9 +86,12 @@ func parse(args []string, params *parseParams, stdout io.Writer, stderr io.Write
 		}
 	}
 
-	parserOpts := ast.ParserOptions{ProcessAnnotation: true}
+	parserOpts := ast.ParserOptions{
+		ProcessAnnotation: true,
+		RegoVersion:       params.regoVersion(),
+	}
 	if exposeLocation {
-		parserOpts.JSONOptions = &astJSON.Options{
+		astJSON.SetOptions(astJSON.Options{
 			MarshalOptions: astJSON.MarshalOptions{
 				IncludeLocationText: true,
 				IncludeLocation: astJSON.NodeToggle{
@@ -91,7 +109,8 @@ func parse(args []string, params *parseParams, stdout io.Writer, stderr io.Write
 					AnnotationsRef: true,
 				},
 			},
-		}
+		})
+		defer astJSON.SetOptions(astJSON.Defaults())
 	}
 
 	result, err := loader.RegoWithOpts(args[0], parserOpts)
@@ -112,12 +131,8 @@ func parse(args []string, params *parseParams, stdout io.Writer, stderr io.Write
 			return 1
 		}
 
-		fmt.Fprint(stdout, string(bs)+"\n")
+		_, _ = fmt.Fprint(stdout, string(bs)+"\n")
 	default:
-		if err != nil {
-			fmt.Fprintln(stderr, err)
-			return 1
-		}
 		ast.Pretty(stdout, result.Parsed)
 	}
 
@@ -127,6 +142,7 @@ func parse(args []string, params *parseParams, stdout io.Writer, stderr io.Write
 func init() {
 	parseCommand.Flags().VarP(configuredParseParams.format, "format", "f", "set output format")
 	parseCommand.Flags().StringVarP(&configuredParseParams.jsonInclude, "json-include", "", "", "include or exclude optional elements. By default comments are included. Current options: locations, comments. E.g. --json-include locations,-comments will include locations and exclude comments.")
+	addV1CompatibleFlag(parseCommand.Flags(), &configuredParseParams.v1Compatible, false)
 
 	RootCommand.AddCommand(parseCommand)
 }

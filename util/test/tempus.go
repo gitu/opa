@@ -7,16 +7,18 @@ package test
 import (
 	"testing"
 	"time"
+
+	v1 "github.com/open-policy-agent/opa/v1/util/test"
 )
 
 func Eventually(t *testing.T, timeout time.Duration, f func() bool) bool {
 	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if f() {
-			return true
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	return false
+	return v1.Eventually(t, timeout, f)
 }
+
+func EventuallyOrFatal(t *testing.T, timeout time.Duration, f func() bool) {
+	t.Helper()
+	v1.EventuallyOrFatal(t, timeout, f)
+}
+
+type BlockingWriter = v1.BlockingWriter

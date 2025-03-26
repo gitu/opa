@@ -11,13 +11,15 @@ import (
 	"path"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
-	"github.com/open-policy-agent/opa/ast"
-	"github.com/open-policy-agent/opa/bundle"
 	"github.com/open-policy-agent/opa/internal/file/archive"
-	"github.com/open-policy-agent/opa/util/test"
+	"github.com/open-policy-agent/opa/v1/ast"
+	astJSON "github.com/open-policy-agent/opa/v1/ast/json"
+	"github.com/open-policy-agent/opa/v1/bundle"
+	"github.com/open-policy-agent/opa/v1/util/test"
 )
 
 func TestGenerateBundleInfoWithFileDir(t *testing.T) {
@@ -52,8 +54,8 @@ func TestGenerateBundleInfoWithFileDir(t *testing.T) {
 		expectedNamespaces := map[string][]string{
 			"data":     {filepath.Join(rootDir, "data.json")},
 			"data.bar": {filepath.Join(rootDir, "base.rego")},
-			"data.foo": {filepath.Join(rootDir, "baz/authz.rego"), filepath.Join(rootDir, "foo/policy.rego")},
-			"data.fuz": {filepath.Join(rootDir, "fuz/fuz.rego"), filepath.Join(rootDir, "fuz/data.json")},
+			"data.foo": {filepath.Join(rootDir, "baz", "authz.rego"), filepath.Join(rootDir, "foo", "policy.rego")},
+			"data.fuz": {filepath.Join(rootDir, "fuz", "fuz.rego"), filepath.Join(rootDir, "fuz", "data.json")},
 		}
 
 		if !reflect.DeepEqual(info.Namespaces, expectedNamespaces) {
@@ -67,7 +69,7 @@ func TestGenerateBundleInfoWithFileDir(t *testing.T) {
 
 		expBuiltinNames := []string{"eq", "gt"}
 
-		if !reflect.DeepEqual(expBuiltinNames, builtinNames) {
+		if !slices.Equal(expBuiltinNames, builtinNames) {
 			t.Fatalf("expected builtin names to be %v but got %v", expBuiltinNames, builtinNames)
 		}
 	})
@@ -92,6 +94,15 @@ p = 1`,
 		if got, exp := len(info.Annotations), 1; got != exp {
 			t.Fatalf("expected %d annotation, but got: %d", exp, got)
 		}
+
+		astJSON.SetOptions(astJSON.Options{
+			MarshalOptions: astJSON.MarshalOptions{
+				IncludeLocation: astJSON.NodeToggle{
+					AnnotationsRef: true,
+				},
+			},
+		})
+		defer astJSON.SetOptions(astJSON.Defaults())
 
 		bs, err := json.Marshal(info.Annotations[0])
 		if err != nil {
@@ -242,7 +253,7 @@ func TestGenerateBundleInfoWithBundleTarGz(t *testing.T) {
 		expectedWasmModules := []map[string]interface{}{}
 		expectedWasmModule1 := map[string]interface{}{
 			"path":        "/example/policy.wasm",
-			"url":         filepath.Join(bundleFile, "/example/policy.wasm"),
+			"url":         filepath.Join(bundleFile, "example", "policy.wasm"),
 			"entrypoints": []string{"data.http.example.foo.allow"},
 		}
 

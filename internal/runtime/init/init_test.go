@@ -16,15 +16,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/open-policy-agent/opa/ast"
-	"github.com/open-policy-agent/opa/bundle"
 	"github.com/open-policy-agent/opa/internal/file/archive"
-	"github.com/open-policy-agent/opa/loader"
-	"github.com/open-policy-agent/opa/storage"
-	inmem "github.com/open-policy-agent/opa/storage/inmem/test"
-	"github.com/open-policy-agent/opa/util"
-	"github.com/open-policy-agent/opa/util/test"
-	"github.com/open-policy-agent/opa/version"
+	"github.com/open-policy-agent/opa/v1/ast"
+	"github.com/open-policy-agent/opa/v1/bundle"
+	"github.com/open-policy-agent/opa/v1/loader"
+	"github.com/open-policy-agent/opa/v1/storage"
+	inmem "github.com/open-policy-agent/opa/v1/storage/inmem/test"
+	"github.com/open-policy-agent/opa/v1/util"
+	"github.com/open-policy-agent/opa/v1/util/test"
+	"github.com/open-policy-agent/opa/v1/version"
 )
 
 func TestInit(t *testing.T) {
@@ -434,8 +434,7 @@ func TestWalkPaths(t *testing.T) {
 	test.WithTempFS(files, func(rootDir string) {
 
 		paths := []string{}
-		paths = append(paths, filepath.Join(rootDir, "bundle1"))
-		paths = append(paths, filepath.Join(rootDir, "bundle2"))
+		paths = append(paths, filepath.Join(rootDir, "bundle1"), filepath.Join(rootDir, "bundle2"))
 
 		// bundle mode
 		loaded, err := WalkPaths(paths, nil, true)

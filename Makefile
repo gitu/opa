@@ -28,7 +28,9 @@ ifeq ($(WASM_ENABLED),1)
 GO_TAGS = -tags=opa_wasm
 endif
 
-GOLANGCI_LINT_VERSION := v1.51.0
+GOLANGCI_LINT_VERSION := v1.64.5
+YAML_LINT_VERSION := 0.29.0
+YAML_LINT_FORMAT ?= auto
 
 DOCKER_RUNNING ?= $(shell docker ps >/dev/null 2>&1 && echo 1 || echo 0)
 
@@ -112,6 +114,9 @@ install: generate
 .PHONY: test
 test: go-test wasm-test
 
+.PHONY: test-short
+test-short: go-test-short
+
 .PHONY: go-build
 go-build: generate
 	$(GO) build $(GO_TAGS) -o $(BIN) -ldflags $(LDFLAGS)
@@ -119,6 +124,10 @@ go-build: generate
 .PHONY: go-test
 go-test: generate
 	$(GO) test $(GO_TAGS),slow ./...
+
+.PHONY: go-test-short
+go-test-short: generate
+	$(GO) test $(GO_TAGS) -short ./...
 
 .PHONY: race-detector
 race-detector: generate
@@ -220,7 +229,7 @@ endif
 .PHONY: wasm-rego-test
 wasm-rego-test: generate
 ifeq ($(DOCKER_RUNNING), 1)
-	GOVERSION=$(GOVERSION) ./build/run-wasm-rego-tests.sh
+	GOVERSION=$(GOVERSION) DOCKER_UID=$(DOCKER_UID) DOCKER_GID=$(DOCKER_GID) ./build/run-wasm-rego-tests.sh
 else
 	@echo "Docker not installed or not running. Skipping Rego-WASM test."
 endif
@@ -231,7 +240,7 @@ wasm-lib-clean:
 
 .PHONY: wasm-rego-testgen-install
 wasm-rego-testgen-install:
-	$(GO) install ./test/wasm/cmd/wasm-rego-testgen
+	$(GO) install ./v1/test/wasm/cmd/wasm-rego-testgen
 
 ######################################################
 #
@@ -332,20 +341,20 @@ image-quick-%: ensure-executable-bin
 ifneq ($(GOARCH),arm64) # build only static images for arm64
 	$(DOCKER) build \
 		-t $(DOCKER_IMAGE):$(VERSION) \
-		--build-arg BASE=cgr.dev/chainguard/glibc-dynamic \
+		--build-arg BASE=chainguard/glibc-dynamic \
 		--build-arg BIN_DIR=$(RELEASE_DIR) \
 		--platform linux/$* \
 		.
 	$(DOCKER) build \
 		-t $(DOCKER_IMAGE):$(VERSION)-debug \
-		--build-arg BASE=cgr.dev/chainguard/glibc-dynamic:latest-dev \
+		--build-arg BASE=chainguard/glibc-dynamic:latest-dev \
 		--build-arg BIN_DIR=$(RELEASE_DIR) \
 		--platform linux/$* \
 		.
 endif
 	$(DOCKER) build \
 		-t $(DOCKER_IMAGE):$(VERSION)-static \
-		--build-arg BASE=cgr.dev/chainguard/static:latest \
+		--build-arg BASE=chainguard/static:latest \
 		--build-arg BIN_DIR=$(RELEASE_DIR) \
 		--build-arg BIN_SUFFIX=_static \
 		--platform linux/$* \
@@ -353,7 +362,7 @@ endif
 
 	$(DOCKER) build \
 		-t $(DOCKER_IMAGE):$(VERSION)-static-debug \
-		--build-arg BASE=cgr.dev/chainguard/busybox:latest-glibc \
+		--build-arg BASE=chainguard/busybox:latest-glibc \
 		--build-arg BIN_DIR=$(RELEASE_DIR) \
 		--build-arg BIN_SUFFIX=_static \
 		--platform linux/$* \
@@ -364,7 +373,7 @@ endif
 push-manifest-list-%: ensure-executable-bin
 	$(DOCKER) buildx build \
 		--tag $(DOCKER_IMAGE):$* \
-		--build-arg BASE=cgr.dev/chainguard/glibc-dynamic:latest \
+		--build-arg BASE=chainguard/glibc-dynamic:latest \
 		--build-arg BIN_DIR=$(RELEASE_DIR) \
 		--platform $(DOCKER_PLATFORMS) \
 		--provenance=false \
@@ -372,7 +381,7 @@ push-manifest-list-%: ensure-executable-bin
 		.
 	$(DOCKER) buildx build \
 		--tag $(DOCKER_IMAGE):$*-debug \
-		--build-arg BASE=cgr.dev/chainguard/glibc-dynamic:latest-dev \
+		--build-arg BASE=chainguard/glibc-dynamic:latest-dev \
 		--build-arg BIN_DIR=$(RELEASE_DIR) \
 		--platform $(DOCKER_PLATFORMS) \
 		--provenance=false \
@@ -381,7 +390,7 @@ push-manifest-list-%: ensure-executable-bin
 
 	$(DOCKER) buildx build \
 		--tag $(DOCKER_IMAGE):$*-static \
-		--build-arg BASE=cgr.dev/chainguard/static:latest \
+		--build-arg BASE=chainguard/static:latest \
 		--build-arg BIN_DIR=$(RELEASE_DIR) \
 		--build-arg BIN_SUFFIX=_static \
 		--platform $(DOCKER_PLATFORMS_STATIC) \
@@ -391,7 +400,7 @@ push-manifest-list-%: ensure-executable-bin
 
 	$(DOCKER) buildx build \
 		--tag $(DOCKER_IMAGE):$*-static-debug \
-		--build-arg BASE=cgr.dev/chainguard/busybox:latest-glibc \
+		--build-arg BASE=chainguard/busybox:latest-glibc \
 		--build-arg BIN_DIR=$(RELEASE_DIR) \
 		--build-arg BIN_SUFFIX=_static \
 		--platform $(DOCKER_PLATFORMS_STATIC) \
@@ -474,6 +483,14 @@ check-go-module:
 	  $(RELEASE_BUILD_IMAGE) \
 	  /bin/bash -c "git config --system --add safe.directory /src && go mod vendor -v"
 
+.PHONY: check-yaml-tests
+check-yaml-tests:
+ifeq ($(DOCKER_RUNNING), 1)
+	docker run --rm -v $(shell pwd):/data:ro,Z -w /data pipelinecomponents/yamllint:${YAML_LINT_VERSION} yamllint -f $(YAML_LINT_FORMAT) v1/test/cases/testdata
+else
+	@echo "Docker not installed or running. Skipping yamllint run."
+endif
+
 ######################################################
 #
 # Release targets
@@ -489,14 +506,14 @@ endif
 		-e GITHUB_TOKEN=$(GITHUB_TOKEN) \
 		-e LAST_VERSION=$(LAST_VERSION) \
 		-v $(PWD):/_src:Z \
-		ashtalk/python-go-perl:v1 \
+		ashtalk/python-go-perl:v2 \
 		/_src/build/gen-release-patch.sh --version=$(VERSION) --source-url=/_src
 
 .PHONY: dev-patch
 dev-patch:
 	@$(DOCKER) run $(DOCKER_FLAGS) \
 		-v $(PWD):/_src:Z \
-		ashtalk/python-go-perl:v1 \
+		ashtalk/python-go-perl:v2 \
 		/_src/build/gen-dev-patch.sh --version=$(VERSION) --source-url=/_src
 
 # Deprecated targets. To be removed.

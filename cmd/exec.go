@@ -4,23 +4,25 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
 
+	"github.com/open-policy-agent/opa/cmd/internal/env"
 	"github.com/open-policy-agent/opa/cmd/internal/exec"
 	"github.com/open-policy-agent/opa/internal/config"
 	internal_logging "github.com/open-policy-agent/opa/internal/logging"
-	"github.com/open-policy-agent/opa/logging"
-	"github.com/open-policy-agent/opa/plugins"
-	"github.com/open-policy-agent/opa/plugins/bundle"
-	"github.com/open-policy-agent/opa/plugins/discovery"
-	"github.com/open-policy-agent/opa/plugins/logs"
-	"github.com/open-policy-agent/opa/plugins/status"
-	"github.com/open-policy-agent/opa/sdk"
-	"github.com/open-policy-agent/opa/util"
+	"github.com/open-policy-agent/opa/v1/logging"
+	"github.com/open-policy-agent/opa/v1/plugins"
+	"github.com/open-policy-agent/opa/v1/plugins/bundle"
+	"github.com/open-policy-agent/opa/v1/plugins/discovery"
+	"github.com/open-policy-agent/opa/v1/plugins/logs"
+	"github.com/open-policy-agent/opa/v1/plugins/status"
+	"github.com/open-policy-agent/opa/v1/sdk"
+	"github.com/open-policy-agent/opa/v1/util"
 )
 
 func init() {
@@ -49,10 +51,17 @@ After: Decision Logs
 By default, the 'exec' command executes the "default decision" (specified in
 the OPA configuration) against each input file. This can be overridden by
 specifying the --decision argument and pointing at a specific policy decision,
-e.g., opa exec --decision /foo/bar/baz ...`,
+e.g., opa exec --decision /foo/bar/baz ...
+`,
 
-		Args: cobra.MinimumNArgs(1),
-		Run: func(cmd *cobra.Command, args []string) {
+		Example: fmt.Sprintf(`  Loading input from stdin:
+    %s exec [<path> [...]] --stdin-input [flags]
+`, RootCommand.Use),
+
+		PreRunE: func(cmd *cobra.Command, _ []string) error {
+			return env.CmdFlags.CheckEnvironmentVariables(cmd)
+		},
+		Run: func(_ *cobra.Command, args []string) {
 			params.Paths = args
 			params.BundlePaths = bundlePaths.v
 			if err := runExec(params); err != nil {
@@ -74,15 +83,36 @@ e.g., opa exec --decision /foo/bar/baz ...`,
 	cmd.Flags().VarP(params.LogLevel, "log-level", "l", "set log level")
 	cmd.Flags().Var(params.LogFormat, "log-format", "set log format")
 	cmd.Flags().StringVar(&params.LogTimestampFormat, "log-timestamp-format", "", "set log timestamp format (OPA_LOG_TIMESTAMP_FORMAT environment variable)")
+	cmd.Flags().BoolVarP(&params.StdIn, "stdin-input", "I", false, "read input document from stdin rather than a static file")
+	cmd.Flags().DurationVar(&params.Timeout, "timeout", 0, "set exec timeout with a Go-style duration, such as '5m 30s'. (default unlimited)")
+	addV0CompatibleFlag(cmd.Flags(), &params.V0Compatible, false)
+	addV1CompatibleFlag(cmd.Flags(), &params.V1Compatible, false)
 
 	RootCommand.AddCommand(cmd)
 }
 
 func runExec(params *exec.Params) error {
+	ctx := context.Background()
+	if params.Timeout != 0 {
+		var cancel func()
+		ctx, cancel = context.WithTimeout(ctx, params.Timeout)
+		defer cancel()
+	}
+	return runExecWithContext(ctx, params)
+}
+
+func runExecWithContext(ctx context.Context, params *exec.Params) error {
+	if minimumInputErr := validateMinimumInput(params); minimumInputErr != nil {
+		return minimumInputErr
+	}
 
 	stdLogger, consoleLogger, err := setupLogging(params.LogLevel.String(), params.LogFormat.String(), params.LogTimestampFormat)
 	if err != nil {
 		return fmt.Errorf("config error: %w", err)
+	}
+
+	if params.Logger != nil {
+		stdLogger = params.Logger
 	}
 
 	config, err := setupConfig(params.ConfigFile, params.ConfigOverrides, params.ConfigOverrideFiles, params.BundlePaths)
@@ -90,7 +120,6 @@ func runExec(params *exec.Params) error {
 		return fmt.Errorf("config error: %w", err)
 	}
 
-	ctx := context.Background()
 	ready := make(chan struct{})
 
 	opa, err := sdk.New(ctx, sdk.Options{
@@ -98,6 +127,8 @@ func runExec(params *exec.Params) error {
 		Logger:        stdLogger,
 		ConsoleLogger: consoleLogger,
 		Ready:         ready,
+		V0Compatible:  params.V0Compatible,
+		V1Compatible:  params.V1Compatible,
 	})
 	if err != nil {
 		return fmt.Errorf("runtime error: %w", err)
@@ -107,7 +138,18 @@ func runExec(params *exec.Params) error {
 		return fmt.Errorf("runtime error: %w", err)
 	}
 
-	<-ready
+	select {
+	case <-ctx.Done():
+		err := ctx.Err()
+		if err == context.DeadlineExceeded {
+			return errors.New("exec error: timed out before OPA was ready. This can happen when a remote bundle is malformed, or the timeout is set too low for normal OPA initialization")
+		}
+		// Note(philipc): Previously, exec would simply eat the context
+		// cancellation error. We now propagate that upwards to the caller.
+		return err
+	case <-ready:
+		// Do nothing; proceed as normal.
+	}
 
 	if err := exec.Exec(ctx, opa, params); err != nil {
 		return fmt.Errorf("exec error: %w", err)
@@ -226,5 +268,12 @@ func injectExplicitBundles(root map[string]interface{}, paths []string) error {
 		}
 	}
 
+	return nil
+}
+
+func validateMinimumInput(params *exec.Params) error {
+	if !params.StdIn && len(params.Paths) == 0 {
+		return errors.New("requires at least 1 path arg, or the --stdin-input flag")
+	}
 	return nil
 }

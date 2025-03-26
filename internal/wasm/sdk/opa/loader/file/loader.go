@@ -10,8 +10,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/open-policy-agent/opa/bundle"
 	"github.com/open-policy-agent/opa/internal/wasm/sdk/opa/errors"
+	"github.com/open-policy-agent/opa/v1/bundle"
+	"github.com/open-policy-agent/opa/v1/util"
 
 	"github.com/open-policy-agent/opa/internal/wasm/sdk/opa"
 )
@@ -45,11 +46,11 @@ type policyData interface {
 // New constructs a new file loader periodically reloading the bundle
 // from a file.
 func New(opa *opa.OPA) *Loader {
-	return new(opa)
+	return newLoader(opa)
 }
 
-// new constructs a new file loader. This is for tests.
-func new(pd policyData) *Loader {
+// newLoader constructs a newLoader file loader. This is for tests.
+func newLoader(pd policyData) *Loader {
 	return &Loader{
 		pd:       pd,
 		interval: DefaultInterval,
@@ -156,9 +157,11 @@ func (l *Loader) poller() {
 			l.logError(err)
 		}
 
+		timer, timerCancel := util.TimerWithCancel(l.interval)
 		select {
-		case <-time.After(l.interval):
+		case <-timer.C:
 		case <-l.closing:
+			timerCancel() // explicitly cancel the timer.
 			return
 		}
 	}

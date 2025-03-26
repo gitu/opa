@@ -17,7 +17,7 @@ trusted registry.
 ```live:container_images:module:openable
 package kubernetes.admission                                                # line 1
 
-deny[msg] {                                                                 # line 2
+deny contains msg if {                                                      # line 2
     input.request.kind.kind == "Pod"                                        # line 3
     image := input.request.object.spec.containers[_].image                  # line 4
     not startswith(image, "hooli.com/")                                     # line 5
@@ -31,7 +31,7 @@ In line 1 the `package kubernetes.admission` declaration gives the (hierarchical
 
 ### Deny Rules
 
-For admission control, you write `deny` statements.  Order does not matter.  (OPA is far more flexible than this, but we recommend writing just `deny` statements to start.)  In line 2, the *head* of the rule `deny[msg]` says that the admission control request should be rejected and the user handed the error message `msg` if the conditions in the *body* (the statements between the `{}`) are true.
+For admission control, you write `deny` statements.  Order does not matter.  (OPA is far more flexible than this, but we recommend writing just `deny` statements to start.)  In line 2, the *head* of the rule `deny contains msg if` says that the admission control request should be rejected and the user handed the error message `msg` if the conditions in the *body* (the statements between the `{}`) are true.
 
 `deny` is the *set* of error messages that should be returned to the user.  Each rule you write adds to that set of error messages.
 
@@ -50,7 +50,7 @@ spec:
     name: mysql-backend
 ```
 
-The admission review request to sent to OPA would look like this:
+The admission review request to be sent to OPA would look like this:
 
 ```live:container_images:input
 {
@@ -205,7 +205,7 @@ package kubernetes.test_admission                         # line 1
 
 import data.kubernetes.admission                          # line 2
 
-test_image_safety {                                       # line 3
+test_image_safety if {                                    # line 3
   unsafe_image := {                                       # line 4
     "request": {
       "kind": {"kind": "Pod"},
@@ -281,7 +281,7 @@ To avoid conflicting ingresses, you write a policy like the one that follows.
 ```live:ingress_conflicts:module:read_only
 package kubernetes.admission
 
-deny[msg] {
+deny contains msg if {
   some namespace, name
   input.request.kind.kind == "Ingress"                                            # line 1
   newhost := input.request.object.spec.rules[_].host                              # line 2
@@ -489,9 +489,9 @@ package system
 import data.kubernetes.admission
 
 main := {
-  "apiVersion": "admission.k8s.io/v1",
-  "kind": "AdmissionReview",
-  "response": response,
+	"apiVersion": "admission.k8s.io/v1",
+	"kind": "AdmissionReview",
+	"response": response,
 }
 
 default uid := ""
@@ -499,14 +499,12 @@ default uid := ""
 uid := input.request.uid
 
 response := {
-    "allowed": false,
-    "uid": uid,
-    "status": {
-        "message": reason,
-    },
-} {
-    reason := concat(", ", admission.deny)
-    reason != ""
+	"allowed": false,
+	"uid": uid,
+	"status": {"message": reason},
+} if {
+	reason := concat(", ", admission.deny)
+	reason != ""
 }
 
 else := {"allowed": true, "uid": uid}

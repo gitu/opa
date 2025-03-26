@@ -8,7 +8,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/open-policy-agent/opa/logging"
+	"github.com/open-policy-agent/opa/v1/logging"
 )
 
 func mockPayload(request KMSSignRequest) string {
@@ -27,7 +27,7 @@ func TestKMS_SignDigest(t *testing.T) {
 	}
 
 	run := func(t *testing.T, tc testCase) {
-		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			if tc.responseStatus != 200 {
 				w.WriteHeader(tc.responseStatus)
 			}

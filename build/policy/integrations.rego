@@ -1,10 +1,22 @@
 package integrations
 
-import future.keywords.contains
-import future.keywords.if
-import future.keywords.in
+import rego.v1
 
 allowed_image_extensions := ["png", "svg"]
+
+# check that each integration key is valid
+deny contains result if {
+	some path, _ in input.integrations
+
+	id := split(path, "/")[2]
+
+	not regex.match("^([a-z0-9-]+)$", id)
+
+	result := {
+		"key": "key",
+		"message": sprintf("integration %s has an invalid key characters, change filename to lowercase and replace spaces with dashes", [id]),
+	}
+}
 
 # check that all integrations have an image
 deny contains result if {
@@ -158,6 +170,34 @@ deny contains result if {
 	result := {
 		"key": "orphaned_org",
 		"message": sprintf("%s has no integrations", [path]),
+	}
+}
+
+# check that each organization key is valid
+deny contains result if {
+	some path, _ in input.organizations
+
+	id := split(path, "/")[2]
+
+	not regex.match("^([a-z0-9-]+)$", id)
+
+	result := {
+		"key": "key",
+		"message": sprintf("organization %s has an invalid key characters, change filename to lowercase and replace spaces with dashes", [id]),
+	}
+}
+
+# check that each software key is valid
+deny contains result if {
+	some path, _ in input.softwares
+
+	id := split(path, "/")[2]
+
+	not regex.match("^([a-z0-9-]+)$", id)
+
+	result := {
+		"key": "key",
+		"message": sprintf("software %s has an invalid key characters, change filename to lowercase and replace spaces with dashes", [id]),
 	}
 }
 

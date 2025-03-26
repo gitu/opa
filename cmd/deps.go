@@ -7,16 +7,18 @@ package cmd
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os"
 
-	"github.com/open-policy-agent/opa/dependencies"
 	"github.com/open-policy-agent/opa/internal/presentation"
+	"github.com/open-policy-agent/opa/v1/dependencies"
 
 	"github.com/spf13/cobra"
 
-	"github.com/open-policy-agent/opa/ast"
-	"github.com/open-policy-agent/opa/loader"
-	"github.com/open-policy-agent/opa/util"
+	"github.com/open-policy-agent/opa/cmd/internal/env"
+	"github.com/open-policy-agent/opa/v1/ast"
+	"github.com/open-policy-agent/opa/v1/loader"
+	"github.com/open-policy-agent/opa/v1/util"
 )
 
 type depsCommandParams struct {
@@ -24,6 +26,19 @@ type depsCommandParams struct {
 	outputFormat *util.EnumFlag
 	ignore       []string
 	bundlePaths  repeatedStringFlag
+	v0Compatible bool
+	v1Compatible bool
+}
+
+func (p *depsCommandParams) regoVersion() ast.RegoVersion {
+	// The '--v0-compatible' flag takes precedence over the '--v1-compatible' flag.
+	if p.v0Compatible {
+		return ast.RegoV0
+	}
+	if p.v1Compatible {
+		return ast.RegoV1
+	}
+	return ast.DefaultRegoVersion
 }
 
 const (
@@ -31,13 +46,19 @@ const (
 	depsFormatJSON   = "json"
 )
 
-func init() {
-
+func newDepsCommandParams() depsCommandParams {
 	var params depsCommandParams
 
 	params.outputFormat = util.NewEnumFlag(depsFormatPretty, []string{
 		depsFormatPretty, depsFormatJSON,
 	})
+
+	return params
+}
+
+func init() {
+
+	params := newDepsCommandParams()
 
 	depsCommand := &cobra.Command{
 		Use:   "deps <query>",
@@ -52,9 +73,6 @@ Example
 Given a policy like this:
 
 	package policy
-
-	import future.keywords.if
-	import future.keywords.in
 
 	allow if is_admin
 
@@ -79,10 +97,10 @@ data.policy.is_admin.
 			if len(args) != 1 {
 				return errors.New("specify exactly one query argument")
 			}
-			return nil
+			return env.CmdFlags.CheckEnvironmentVariables(cmd)
 		},
-		Run: func(cmd *cobra.Command, args []string) {
-			if err := deps(args, params); err != nil {
+		Run: func(_ *cobra.Command, args []string) {
+			if err := deps(args, params, os.Stdout); err != nil {
 				fmt.Fprintln(os.Stderr, err)
 				os.Exit(1)
 			}
@@ -93,11 +111,12 @@ data.policy.is_admin.
 	addDataFlag(depsCommand.Flags(), &params.dataPaths)
 	addBundleFlag(depsCommand.Flags(), &params.bundlePaths)
 	addOutputFormat(depsCommand.Flags(), params.outputFormat)
+	addV1CompatibleFlag(depsCommand.Flags(), &params.v1Compatible, false)
 
 	RootCommand.AddCommand(depsCommand)
 }
 
-func deps(args []string, params depsCommandParams) error {
+func deps(args []string, params depsCommandParams, w io.Writer) error {
 
 	query, err := ast.ParseBody(args[0])
 	if err != nil {
@@ -111,7 +130,9 @@ func deps(args []string, params depsCommandParams) error {
 			Ignore: params.ignore,
 		}
 
-		result, err := loader.NewFileLoader().Filtered(params.dataPaths.v, f.Apply)
+		result, err := loader.NewFileLoader().
+			WithRegoVersion(params.regoVersion()).
+			Filtered(params.dataPaths.v, f.Apply)
 		if err != nil {
 			return err
 		}
@@ -158,8 +179,8 @@ func deps(args []string, params depsCommandParams) error {
 
 	switch params.outputFormat.String() {
 	case depsFormatJSON:
-		return presentation.JSON(os.Stdout, output)
+		return presentation.JSON(w, output)
 	default:
-		return output.Pretty(os.Stdout)
+		return output.Pretty(w)
 	}
 }

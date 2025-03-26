@@ -5,14 +5,16 @@
 package planner
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
-	"github.com/open-policy-agent/opa/ast"
-	"github.com/open-policy-agent/opa/ir"
+	"github.com/open-policy-agent/opa/v1/ast"
+	"github.com/open-policy-agent/opa/v1/ir"
 )
 
 func TestPlannerHelloWorld(t *testing.T) {
@@ -89,8 +91,8 @@ func TestPlannerHelloWorld(t *testing.T) {
 			queries: []string{"data.test.p = x"},
 			modules: []string{`
 				package test
-				p = x { x = 1 }
-				p = y { y = 2 }
+				p = x if { x = 1 }
+				p = y if { y = 2 }
 			`},
 		},
 		{
@@ -98,7 +100,7 @@ func TestPlannerHelloWorld(t *testing.T) {
 			queries: []string{"data.test.p = 10"},
 			modules: []string{`
 				package test
-				p = x { x = 10 }
+				p = x if { x = 10 }
 			`},
 		},
 		{
@@ -106,7 +108,7 @@ func TestPlannerHelloWorld(t *testing.T) {
 			queries: []string{"data.test.f([1,x])"},
 			modules: []string{`
 				package test
-				f([a, b]) {
+				f([a, b]) if {
 					a = b
 				}
 			`},
@@ -116,9 +118,9 @@ func TestPlannerHelloWorld(t *testing.T) {
 			queries: []string{"data.test.p = 1"},
 			modules: []string{`
 				package test
-				p = 0 {
+				p = 0 if {
 					false
-				} else = 1 {
+				} else = 1 if {
 					true
 				}
 			`},
@@ -128,8 +130,8 @@ func TestPlannerHelloWorld(t *testing.T) {
 			queries: []string{"data.test.p = {1,2}"},
 			modules: []string{`
 				package test
-				p[1]
-				p[2]
+				p contains 1
+				p contains 2
 			`},
 		},
 		{
@@ -147,7 +149,7 @@ func TestPlannerHelloWorld(t *testing.T) {
 			modules: []string{`
 				package test
 				p["a"] = 1
-				p[v] = 2 { v := "b" }
+				p[v] = 2 if { v := "b" }
 			`},
 		},
 		{
@@ -156,7 +158,7 @@ func TestPlannerHelloWorld(t *testing.T) {
 			modules: []string{`
 				package test
 				p.q.r["a"] = 1
-				p.q[v] = 2 { v := "b" }
+				p.q[v] = 2 if { v := "b" }
 			`},
 		},
 		{
@@ -165,9 +167,9 @@ func TestPlannerHelloWorld(t *testing.T) {
 			modules: []string{`
 				package test
 				p.q["a"] = 1
-				p.q[v] = 2 { v := "b" }
+				p.q[v] = 2 if { v := "b" }
 				p.r["c"] = 3
-				p.r[v] = 4 { v := "d" }
+				p.r[v] = 4 if { v := "d" }
 			`},
 		},
 		{
@@ -176,7 +178,7 @@ func TestPlannerHelloWorld(t *testing.T) {
 			modules: []string{`
 				package test
 				p.q["a"] = 1
-				p.q[v] = x { l1 := ["b", "c", "d"]; l2 := ["foo", "bar"]; l3 := [2, 3]; v := l1[_]; x := l2[_]; z := l3[_] }
+				p.q[v] = x if { l1 := ["b", "c", "d"]; l2 := ["foo", "bar"]; l3 := [2, 3]; v := l1[_]; x := l2[_]; z := l3[_] }
 			`},
 		},
 		{
@@ -187,7 +189,7 @@ func TestPlannerHelloWorld(t *testing.T) {
 				p.q["a"] = 1
 				p.q.b.s.baz = 2
 				p.q.b.s.foo.c = 3
-				p.q[r].s[t].u = v { x := ["foo", "bar"]; r := "b"; t := x[v]}
+				p.q[r].s[t].u = v if { x := ["foo", "bar"]; r := "b"; t := x[v]}
 			`},
 		},
 		{
@@ -195,7 +197,7 @@ func TestPlannerHelloWorld(t *testing.T) {
 			queries: []string{`data.test.p`},
 			modules: []string{`
 				package test
-				p { xs = [1]; every k, v in xs { k < v } }
+				p if { xs = [1]; every k, v in xs { k < v } }
 			`},
 		},
 		{
@@ -205,7 +207,7 @@ func TestPlannerHelloWorld(t *testing.T) {
 				package test
 
 				p = 1
-				q = 2 { false }
+				q = 2 if { false }
 			`},
 		},
 		{
@@ -233,7 +235,7 @@ func TestPlannerHelloWorld(t *testing.T) {
 					package test.a
 
 					p = 1
-					q = 2 { false }
+					q = 2 if { false }
 					r = 3
 				`,
 				`
@@ -291,10 +293,10 @@ func TestPlannerHelloWorld(t *testing.T) {
 			modules: []string{
 				`package p
 
-				q {
+				q if {
 					false
 				}
-				else = true {
+				else = true if {
 					true
 				}
 				q = false
@@ -307,16 +309,16 @@ func TestPlannerHelloWorld(t *testing.T) {
 			modules: []string{
 				`package p
 
-				q {
+				q if {
 					false
 				}
-				else = false {
+				else = false if {
 					true
 				}
-				q {
+				q if {
 					false
 				}
-				else = true {
+				else = true if {
 					true
 				}`,
 			},
@@ -327,11 +329,11 @@ func TestPlannerHelloWorld(t *testing.T) {
 			modules: []string{
 				`package p
 
-				p(a) = y {
+				p(a) = y if {
 				  y = a[_]
 				}
 
-				r = y {
+				r = y if {
 				  data.p.p([1, 2, 3], y)
 				}
 				`,
@@ -343,14 +345,14 @@ func TestPlannerHelloWorld(t *testing.T) {
 			modules: []string{
 				`package p
 
-				p(1, a) = y {
+				p(1, a) = y if {
 					y = a
 				}
-				p(x, y) = z {
+				p(x, y) = z if {
 					z = x
 				}
 
-				r = y {
+				r = y if {
 					data.p.p(1, 0, y)
 				}
 				`,
@@ -493,7 +495,7 @@ func TestPlannerLocations(t *testing.T) {
 			queries: []string{"data.test.p = 10"},
 			modules: []string{`
 package test
-p = x {
+p = x if {
   1 > 0
   x = 10
   true
@@ -511,12 +513,12 @@ p = x {
 			queries: []string{"data.test.p = {1,2}"},
 			modules: []string{`
 package test
-p[1]
-p[2]
+p contains 1
+p contains 2
 			`},
 			exps: map[ir.Stmt]string{
-				&ir.MakeSetStmt{}:     "module-0.rego:3:1: p[1]",
-				&ir.ReturnLocalStmt{}: "module-0.rego:3:1: p[1]",
+				&ir.MakeSetStmt{}:     "module-0.rego:3:1: p contains 1",
+				&ir.ReturnLocalStmt{}: "module-0.rego:3:1: p contains 1",
 			},
 			where: funcs,
 		},
@@ -525,13 +527,13 @@ p[2]
 			queries: []string{"data.test.p = {1,2}"},
 			modules: []string{`
 package test
-p[1] {
+p contains 1 if {
   1 > 2
 }
 			`},
 			exps: map[ir.Stmt]string{
 				&ir.CallStmt{}:   "module-0.rego:4:3: 1 > 2",
-				&ir.SetAddStmt{}: "module-0.rego:3:1: p[1]",
+				&ir.SetAddStmt{}: "module-0.rego:3:1: p contains 1",
 			},
 			where: funcs,
 		},
@@ -540,7 +542,7 @@ p[1] {
 			queries: []string{`data.test.p = {"a": 1, "b": 2}`},
 			modules: []string{`
 package test
-p["a"] = 1 {
+p["a"] = 1 if {
   false
 }
 			`},
@@ -556,7 +558,7 @@ p["a"] = 1 {
 			modules: []string{`
 package test
 default p = {"foo": "bar"}
-p = x {
+p = x if {
   x := {"baz": "quz"}
 }
 			`},
@@ -625,7 +627,7 @@ a = { "a", 10 }`},
 			queries: []string{`data`},
 			modules: []string{`package test
 p = 1
-q = 2 {
+q = 2 if {
   false
 }`},
 			exps: map[ir.Stmt]string{
@@ -656,7 +658,7 @@ a = true`},
 			note:    "non-ground ref in policy",
 			queries: []string{`data.test.a = x`},
 			modules: []string{`package test
-a {
+a if {
   data.test1[_].y = "z"
 }`},
 			exps: map[ir.Stmt]string{
@@ -671,7 +673,7 @@ a {
 			note:    "CallDynamicStmt optimization",
 			queries: []string{`x := "a"; data.test[x] = y`},
 			modules: []string{`package test
-a {
+a if {
   true
 }`},
 			exps: map[ir.Stmt]string{
@@ -689,7 +691,7 @@ a {
 			modules := make([]*ast.Module, len(tc.modules))
 			for i := range modules {
 				file := fmt.Sprintf("module-%d.rego", i)
-				m, err := ast.ParseModule(file, tc.modules[i])
+				m, err := ast.ParseModuleWithOpts(file, tc.modules[i], ast.ParserOptions{AllFutureKeywords: true})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -1069,6 +1071,58 @@ func TestOptimizeLookup(t *testing.T) {
 			t.Fatalf("expected %d rules in ruleset[0], got %d\n", exp, act)
 		}
 	})
+
+	t.Run("ref heads, unrelated rule in ruletrie", func(t *testing.T) {
+		r0 := ast.MustParseRule("allow[x].something { x := \"show\" }")
+		r1 := ast.MustParseRule("allow.see.something_else { true }")
+		r2 := ast.MustParseRule(`allow.other.stuff { true }`)
+		r := newRuletrie()
+		val := r.LookupOrInsert(ref("primary.allow"))
+		val.rules = append(val.rules, r0, r1)
+		val = r.LookupOrInsert(ref("unrelated.allow.other.stuff"))
+		val.rules = append(val.rules, r2)
+
+		if testing.Verbose() {
+			t.Logf("rules: %v", r)
+		}
+
+		p := planner()
+		p.vars.Put(ast.Var("x"), p.newLocal())
+		rulesets, _, _, opt := p.optimizeLookup(r, ast.MustParseRef("data[x].allow.see.something_else"))
+
+		if exp, act := true, opt; exp != act {
+			t.Errorf("expected 'optimize' %v, got %v\n", exp, act)
+		}
+		if exp, act := 1, len(rulesets); exp != act {
+			t.Fatalf("expected %d rulesets, got %d\n", exp, act)
+		}
+
+		if exp, act := 2, len(rulesets[0]); exp != act {
+			t.Fatalf("expected %d rules in ruleset[0], got %d\n", exp, act)
+		}
+	})
+
+	t.Run("ref heads, mixed-length rules in ruletrie", func(t *testing.T) {
+		r0 := ast.MustParseRule("allow[x].something { x := \"show\" }")
+		r1 := ast.MustParseRule("allow.see.something_else { true }")
+		r := newRuletrie()
+		val := r.LookupOrInsert(ref("primary.allow"))
+		val.rules = append(val.rules, r0)
+		val = r.LookupOrInsert(ref("secondary.allow.see.something_else"))
+		val.rules = append(val.rules, r1)
+
+		if testing.Verbose() {
+			t.Logf("rules: %v", r)
+		}
+
+		p := planner()
+		p.vars.Put(ast.Var("x"), p.newLocal())
+		_, _, _, opt := p.optimizeLookup(r, ast.MustParseRef("data[x].allow.see.something_else"))
+
+		if exp, act := false, opt; exp != act {
+			t.Errorf("expected 'optimize' %v, got %v\n", exp, act)
+		}
+	})
 }
 
 func TestPlannerCallDynamic(t *testing.T) {
@@ -1084,7 +1138,7 @@ func TestPlannerCallDynamic(t *testing.T) {
 			note:    "CallDynamicStmt optimization",
 			queries: []string{`x := "a"; data.test[x] = y`},
 			modules: []string{`package test
-a { true }`},
+a if { true }`},
 			path: []interface{}{"g0", "test", 2},
 			extras: []func(interface{}) error{
 				findFunc("g0.data.test.a", "g0.test.a"),
@@ -1094,7 +1148,7 @@ a { true }`},
 			note:    "simple single-val ref head",
 			queries: []string{`x := "a"; data.test.a[x].c = y`},
 			modules: []string{`package test
-a.b.c = 1 { true }`},
+a.b.c = 1 if { true }`},
 			path: []interface{}{"g0", "test", "a", 2, "c"},
 			extras: []func(interface{}) error{
 				findFunc("g0.data.test.a.b.c", "g0.test.a.b.c"),
@@ -1104,8 +1158,8 @@ a.b.c = 1 { true }`},
 			note:    "two single-val ref heads, string+var",
 			queries: []string{`x := "a"; data.test.a[x] = y`},
 			modules: []string{`package test
-a.b.c = 1 { true }
-a.b[t] = 2 { t := input }`},
+a.b.c = 1 if { true }
+a.b[t] = 2 if { t := input }`},
 			path: []interface{}{"g0", "test", "a", 2},
 			extras: []func(interface{}) error{
 				findFunc("g0.data.test.a.b", "g0.test.a.b"),
@@ -1115,8 +1169,8 @@ a.b[t] = 2 { t := input }`},
 			note:    "two single-val ref heads, number+var",
 			queries: []string{`x := "a"; data.test.a[x] = y`},
 			modules: []string{`package test
-a.b[1] = 1 { true }
-a.b[t] = 2 { t := input }`},
+a.b[1] = 1 if { true }
+a.b[t] = 2 if { t := input }`},
 			path: []interface{}{"g0", "test", "a", 2},
 			extras: []func(interface{}) error{
 				findFunc("g0.data.test.a.b", "g0.test.a.b"),
@@ -1126,7 +1180,7 @@ a.b[t] = 2 { t := input }`},
 			note:    "one single-val ref head, number",
 			queries: []string{`x := "a"; data.test.a[x] = y`},
 			modules: []string{`package test
-a.b[1] = 1 { true }`},
+a.b[1] = 1 if { true }`},
 			path: []interface{}{"g0", "test", "a", 2},
 			extras: []func(interface{}) error{
 				findFunc("g0.data.test.a.b", "g0.test.a.b"),
@@ -1143,7 +1197,7 @@ a.b[1] = 1 { true }`},
 			modules := make([]*ast.Module, len(tc.modules))
 			for i := range modules {
 				file := fmt.Sprintf("module-%d.rego", i)
-				m, err := ast.ParseModule(file, tc.modules[i])
+				m, err := ast.ParseModuleWithOpts(file, tc.modules[i], ast.ParserOptions{AllFutureKeywords: true})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -1222,7 +1276,7 @@ func (w *stmtCmpWalker) Visit(x interface{}) (ir.Visitor, error) {
 			f, ok := x.(*ir.Func)
 			if ok && s.Name == f.Name {
 				w.found = true
-				if !reflect.DeepEqual(s.Path, f.Path) {
+				if !slices.Equal(s.Path, f.Path) {
 					return nil, fmt.Errorf("func %v: expected path %v, got %v", f, s.Path, f.Path)
 				}
 			}
@@ -1237,7 +1291,7 @@ func findCallDynamic(path []ir.Operand, p interface{}) error {
 		return err
 	}
 	if !w.found {
-		return fmt.Errorf("not found")
+		return errors.New("not found")
 	}
 	return nil
 }
@@ -1249,7 +1303,7 @@ func findFunc(name, path string) func(interface{}) error {
 			return err
 		}
 		if !w.found {
-			return fmt.Errorf("not found")
+			return errors.New("not found")
 		}
 		return nil
 	}

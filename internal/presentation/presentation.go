@@ -8,6 +8,7 @@ package presentation
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -18,15 +19,15 @@ import (
 
 	"github.com/olekukonko/tablewriter"
 
-	"github.com/open-policy-agent/opa/ast"
-	"github.com/open-policy-agent/opa/cover"
-	"github.com/open-policy-agent/opa/format"
-	"github.com/open-policy-agent/opa/loader"
-	"github.com/open-policy-agent/opa/metrics"
-	"github.com/open-policy-agent/opa/profiler"
-	"github.com/open-policy-agent/opa/rego"
-	"github.com/open-policy-agent/opa/storage"
-	"github.com/open-policy-agent/opa/topdown"
+	"github.com/open-policy-agent/opa/v1/ast"
+	"github.com/open-policy-agent/opa/v1/cover"
+	"github.com/open-policy-agent/opa/v1/format"
+	"github.com/open-policy-agent/opa/v1/loader"
+	"github.com/open-policy-agent/opa/v1/metrics"
+	"github.com/open-policy-agent/opa/v1/profiler"
+	"github.com/open-policy-agent/opa/v1/rego"
+	"github.com/open-policy-agent/opa/v1/storage"
+	"github.com/open-policy-agent/opa/v1/topdown"
 )
 
 // DefaultProfileSortOrder is the default ordering unless something is specified in the CLI
@@ -142,19 +143,14 @@ func NewOutputErrors(err error) []OutputError {
 
 		switch typedErr := err.(type) {
 		case *ast.Error:
-			oe := OutputError{
-				Code:    typedErr.Code,
-				Message: typedErr.Message,
-				Details: typedErr.Details,
-				err:     typedErr,
-			}
+			errs = []OutputError{{
+				Code:     typedErr.Code,
+				Message:  typedErr.Message,
+				Details:  typedErr.Details,
+				Location: typedErr.Location,
+				err:      typedErr,
+			}}
 
-			// TODO(patrick-east): Why does the JSON marshaller marshal
-			// location as `null` when err.location == nil?!
-			if typedErr.Location != nil {
-				oe.Location = typedErr.Location
-			}
-			errs = []OutputError{oe}
 		case *topdown.Error:
 			errs = []OutputError{{
 				Code:     typedErr.Code,
@@ -184,11 +180,9 @@ func NewOutputErrors(err error) []OutputError {
 				}
 			}
 		case loader.Errors:
-			{
-				for _, e := range typedErr {
-					if e != nil {
-						errs = append(errs, NewOutputErrors(e)...)
-					}
+			for _, e := range typedErr {
+				if e != nil {
+					errs = append(errs, NewOutputErrors(e)...)
 				}
 			}
 		default:
@@ -239,10 +233,10 @@ func (e OutputErrors) Error() string {
 // library errors so that the JSON output given by the
 // presentation package is consistent and parsable.
 type OutputError struct {
-	Message  string      `json:"message"`
-	Code     string      `json:"code,omitempty"`
-	Location interface{} `json:"location,omitempty"`
-	Details  interface{} `json:"details,omitempty"`
+	Message  string        `json:"message"`
+	Code     string        `json:"code,omitempty"`
+	Location *ast.Location `json:"location,omitempty"`
+	Details  interface{}   `json:"details,omitempty"`
 	err      error
 }
 
@@ -289,8 +283,21 @@ func Values(w io.Writer, r Output) error {
 
 // Pretty prints all of r to w in a human-readable format.
 func Pretty(w io.Writer, r Output) error {
+	return PrettyWithOptions(w, r, PrettyOptions{
+		TraceOpts: topdown.PrettyTraceOptions{
+			Locations: true,
+		},
+	})
+}
+
+type PrettyOptions struct {
+	TraceOpts topdown.PrettyTraceOptions
+}
+
+// PrettyWithOptions prints all of r to w in a human-readable format.
+func PrettyWithOptions(w io.Writer, r Output, opts PrettyOptions) error {
 	if len(r.Explanation) > 0 {
-		if err := prettyExplanation(w, r.Explanation); err != nil {
+		if err := prettyExplanation(w, r.Explanation, opts.TraceOpts); err != nil {
 			return err
 		}
 	}
@@ -356,7 +363,7 @@ func Source(w io.Writer, r Output) error {
 
 	for i := range r.Partial.Support {
 		fmt.Fprintf(w, "# Module %d\n", i+1)
-		bs, err := format.AstWithOpts(r.Partial.Support[i], format.Opts{IgnoreLocations: true})
+		bs, err := format.AstWithOpts(r.Partial.Support[i], format.Opts{IgnoreLocations: true, RegoVersion: r.Partial.Support[i].RegoVersion()})
 		if err != nil {
 			return err
 		}
@@ -404,7 +411,7 @@ func Discard(w io.Writer, x interface{}) error {
 	encoder.SetIndent("", "  ")
 	field, ok := x.(Output)
 	if !ok {
-		return fmt.Errorf("error in converting interface to type Output")
+		return errors.New("error in converting interface to type Output")
 	}
 	bs, err := json.Marshal(field)
 	if err != nil {
@@ -451,25 +458,25 @@ func prettyPartial(w io.Writer, pq *rego.PartialQueries) error {
 	var maxWidth int
 
 	for i := range pq.Queries {
-		s, width, err := prettyASTNode(pq.Queries[i])
+		f, width, err := prettyASTNode(pq.Queries[i], ast.DefaultRegoVersion)
 		if err != nil {
 			return err
 		}
 		if width > maxWidth {
 			maxWidth = width
 		}
-		table.Append([]string{fmt.Sprintf("Query %d", i+1), s})
+		table.Append([]string{fmt.Sprintf("Query %d", i+1), f})
 	}
 
-	for i := range pq.Support {
-		s, width, err := prettyASTNode(pq.Support[i])
+	for i, s := range pq.Support {
+		f, width, err := prettyASTNode(s, s.RegoVersion())
 		if err != nil {
 			return err
 		}
 		if width > maxWidth {
 			maxWidth = width
 		}
-		table.Append([]string{fmt.Sprintf("Support %d", i+1), s})
+		table.Append([]string{fmt.Sprintf("Support %d", i+1), f})
 	}
 
 	table.SetColMinWidth(1, maxWidth)
@@ -479,13 +486,13 @@ func prettyPartial(w io.Writer, pq *rego.PartialQueries) error {
 }
 
 // prettyASTNode is used for pretty-printing the result of partial eval
-func prettyASTNode(x interface{}) (string, int, error) {
-	bs, err := format.AstWithOpts(x, format.Opts{IgnoreLocations: true})
+func prettyASTNode(x interface{}, regoVersion ast.RegoVersion) (string, int, error) {
+	bs, err := format.AstWithOpts(x, format.Opts{IgnoreLocations: true, RegoVersion: regoVersion})
 	if err != nil {
 		return "", 0, fmt.Errorf("format error: %w", err)
 	}
 	var maxLineWidth int
-	s := strings.Trim(strings.Replace(string(bs), "\t", "  ", -1), "\n")
+	s := strings.Trim(strings.ReplaceAll(string(bs), "\t", "  "), "\n")
 	for _, line := range strings.Split(s, "\n") {
 		width := tablewriter.DisplayWidth(line)
 		if width > maxLineWidth {
@@ -561,8 +568,8 @@ func prettyAggregatedProfile(w io.Writer, profile []profiler.ExprStatsAggregated
 	return nil
 }
 
-func prettyExplanation(w io.Writer, explanation []*topdown.Event) error {
-	topdown.PrettyTraceWithLocation(w, explanation)
+func prettyExplanation(w io.Writer, explanation []*topdown.Event, opts topdown.PrettyTraceOptions) error {
+	topdown.PrettyTraceWithOpts(w, explanation, opts)
 	return nil
 }
 

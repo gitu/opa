@@ -30,20 +30,28 @@ The `run` command accepts a `--server` (or `-s`) flag that starts OPA as a
 server. See `--help` for more information on other arguments. The most important
 command line arguments for OPA's server mode are:
 
-* `--addr` to set the listening address (default: `0.0.0.0:8181`).
+* `--addr` to set the listening address (default: `localhost:8181`).
 * `--log-level` (or `-l`) to set the log level (default: `"info"`).
 * `--log-format` to set the log format (default: `"json"`).
-* `--v1-compatible` to opt-in to OPA features and behaviors that will be enabled by default in a future OPA v1.0 release. For example, setting the listening address to `localhost:8181` by default.
 
-By default, OPA listens for normal HTTP connections on `0.0.0.0:8181`. To make
+By default, OPA listens for normal HTTP connections on `localhost:8181`. To make
 OPA listen for HTTPS connections, see [Security](../security).
 
 We can run OPA as a server using Docker:
 
 ```bash
 docker run -p 8181:8181 openpolicyagent/opa \
-    run --server --log-level debug
+    run --server --log-level debug --addr=0.0.0.0:8181
 ```
+
+{{< info >}}
+We have to use `--addr` here to bind to all interfaces to ensure OPA is
+accessible from outside the container. This is not necessary when running OPA
+in other environments.
+
+More information can be found in the
+[security documentation](../security/#interface-binding).
+{{< /info >}}
 
 Test that OPA is available:
 
@@ -470,6 +478,11 @@ Features present in the list are enabled, while features not present are disable
 * `rego_v1_import`: enables use of the `rego.v1` import.
 
 ### Future keywords
+
+{{< info >}}
+It is recommended to use the `rego.v1` import instead of `future.keywords` imports, as this will ensure that your policy is compatible with the future release of [OPA v1.0](./opa-1/).
+If the `rego.v1` import is present in a module, then `future.keywords` and `future.keywords.*` import is implied, and not allowed.
+{{< /info >}}
 
 The availability of future keywords in an OPA version can also be controlled using the capabilities file:
 

@@ -22,29 +22,31 @@ This page focuses predominantly on different ways to integrate with OPA's policy
 - See the [Health API](../rest-api#health-api) for checking agent deployment readiness and health.
 - See the [Prometheus API endpoint](../monitoring/#prometheus) to obtain insight into performance and errors.
 
-
 ## Evaluating Policies
 
 OPA supports different ways to evaluate policies.
 
 * The [REST API](../rest-api) returns decisions as JSON over HTTP.
-* The [Go API (GoDoc)](https://pkg.go.dev/github.com/open-policy-agent/opa/rego) returns
+  * Also see the [Language SDKs](/ecosystem/#languages) for working with the REST API in different languages.
+* The [Go API (GoDoc)](https://pkg.go.dev/github.com/open-policy-agent/opa/v1/rego) returns
   decisions as simple Go types (`bool`, `string`, `map[string]interface{}`,
   etc.)
 * [WebAssembly](../wasm) compiles Rego policies into Wasm instructions so they can be embedded and evaluated by any WebAssembly runtime
 * Custom compilers and evaluators may be written to parse evaluation plans in the low-level
   [Intermediate Representation](../ir) format, which can be emitted by the `opa build` command
-* The [SDK](https://pkg.go.dev/github.com/open-policy-agent/opa/sdk) provides high-level APIs for obtaining the output
+* The [SDK](https://pkg.go.dev/github.com/open-policy-agent/opa/v1/sdk) provides high-level APIs for obtaining the output
   of query evaluation as simple Go types (`bool`, `string`, `map[string]interface{}`, etc.)
-
 
 ### Integrating with the REST API
 
 To integrate with OPA outside of Go, we recommend you deploy OPA as a host-level
-daemon or sidecar container. When your application or service needs to make
-policy decisions it can query OPA locally via HTTP. Running OPA locally on the
-same host as your application or service helps ensure policy decisions are fast
-and highly-available.
+daemon or sidecar container. Running OPA locally on the same host as your
+application or service helps ensure policy decisions are fast and highly-available.
+
+When your application or service needs to make policy decisions it can query OPA
+locally via HTTP. While it's possible to call OPA's [REST API](../rest-api) directly,
+you can also find a number of [native language REST SDKs](/ecosystem/#languages)
+which make the integration easier.
 
 #### Named Policy Decisions
 
@@ -68,14 +70,11 @@ decisions: `example/authz/allow` and `example/authz/is_admin`.
 ```live:authz:module:openable,read_only
 package example.authz
 
-import future.keywords.if
-import future.keywords.in
-
 default allow := false
 
 allow if {
-    input.method == "GET"
-    input.path == ["salary", input.subject.user]
+	input.method == "GET"
+	input.path == ["salary", input.subject.user]
 }
 
 allow if is_admin
@@ -205,8 +204,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/open-policy-agent/opa/sdk"
-	sdktest "github.com/open-policy-agent/opa/sdk/test"
+	"github.com/open-policy-agent/opa/v1/sdk"
+	sdktest "github.com/open-policy-agent/opa/v1/sdk/test"
 )
 
 func main() {
@@ -216,8 +215,6 @@ func main() {
 	server, err := sdktest.NewServer(sdktest.MockBundle("/bundles/bundle.tar.gz", map[string]string{
 		"example.rego": `
 				package authz
-
-				import future.keywords.if
 
 				default allow := false
 
@@ -276,10 +273,16 @@ Setting an `ID` in `sdk.Options` is optional, but recommended. If you do not set
 for the system. While this is fine for testing, it makes it difficult to monitor the system over time, as a new ID will
 be created each time the SDK is initialized, such as when the process is restarted.
 
+{{< info >}}
+This section documents the v1 SDK package.
+Please see [v0 Backwards Compatibility](../v0-compatibility) for notes on using
+the v0 SDK package.
+{{< /info >}}
+
 ### Integrating with the Go API
 
 Use the low-level
-[github.com/open-policy-agent/opa/rego](https://pkg.go.dev/github.com/open-policy-agent/opa/rego)
+[github.com/open-policy-agent/opa/v1/rego](https://pkg.go.dev/github.com/open-policy-agent/opa/v1/rego)
 package to embed OPA as a library inside services written in Go, when only policy **evaluation** — and
 no other capabilities of OPA, like the management features — are desired. If you're unsure which one to
 use, the SDK is probably the better option.
@@ -287,7 +290,7 @@ use, the SDK is probably the better option.
 To get started import the `rego` package:
 
 ```go
-import "github.com/open-policy-agent/opa/rego"
+import "github.com/open-policy-agent/opa/v1/rego"
 ```
 
 The `rego` package exposes different options for customizing how policies are
@@ -311,9 +314,6 @@ store, etc.
 
 module := `
 package example.authz
-
-import future.keywords.if
-import future.keywords.in
 
 default allow := false
 
@@ -390,13 +390,19 @@ if !results.Allowed() {
 ```
 
 For more examples of embedding OPA as a library see the
-[`rego`](https://pkg.go.dev/github.com/open-policy-agent/opa/rego#pkg-examples)
+[`rego`](https://pkg.go.dev/github.com/open-policy-agent/opa/v1/rego#pkg-examples)
 package in the Go documentation.
+
+{{< info >}}
+This section documents the v1 Rego package.
+Please see [v0 Backwards Compatibility](../v0-compatibility) for notes on using
+the v0 Rego package.
+{{< /info >}}
 
 #### Ecosystem Projects
 
 The Go API is made available to allow other projects to build policy functionality into their
-applications. 
+applications.
 {{<
   ecosystem_feature_link
   key="go-integration"
@@ -412,7 +418,7 @@ applications.
 
 Policies can be evaluated as compiled Wasm binaries. See [OPA Wasm docs](../wasm) for more details.
 
-There are a number of projects already built on OPA Wasm, 
+There are a number of projects already built on OPA Wasm,
 {{<
   ecosystem_feature_link
   key="wasm-integration"

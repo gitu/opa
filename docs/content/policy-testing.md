@@ -32,16 +32,15 @@ profile.
 
 ```live:example:module:read_only,openable
 package authz
-import future.keywords
 
 allow if {
-    input.path == ["users"]
-    input.method == "POST"
+	input.path == ["users"]
+	input.method == "POST"
 }
 
 allow if {
-    input.path == ["users", input.user_id]
-    input.method == "GET"
+	input.path == ["users", input.user_id]
+	input.method == "GET"
 }
 ```
 
@@ -50,23 +49,24 @@ To test this policy, we will create a separate Rego file that contains test case
 **example_test.rego**:
 
 ```live:example/test:module:read_only
-package authz
-import future.keywords
+package authz_test
+
+import data.authz
 
 test_post_allowed if {
-    allow with input as {"path": ["users"], "method": "POST"}
+	authz.allow with input as {"path": ["users"], "method": "POST"}
 }
 
 test_get_anonymous_denied if {
-    not allow with input as {"path": ["users"], "method": "GET"}
+	not authz.allow with input as {"path": ["users"], "method": "GET"}
 }
 
 test_get_user_allowed if {
-    allow with input as {"path": ["users", "bob"], "method": "GET", "user_id": "bob"}
+	authz.allow with input as {"path": ["users", "bob"], "method": "GET", "user_id": "bob"}
 }
 
 test_get_another_user_denied if {
-    not allow with input as {"path": ["users", "bob"], "method": "GET", "user_id": "alice"}
+	not authz.allow with input as {"path": ["users", "bob"], "method": "GET", "user_id": "alice"}
 }
 ```
 
@@ -81,10 +81,10 @@ To exercise the policy, run the `opa test` command in the directory containing t
 
 ```console
 $ opa test . -v
-data.authz.test_post_allowed: PASS (1.417µs)
-data.authz.test_get_anonymous_denied: PASS (426ns)
-data.authz.test_get_user_allowed: PASS (367ns)
-data.authz.test_get_another_user_denied: PASS (320ns)
+data.authz_test.test_post_allowed: PASS (1.417µs)
+data.authz_test.test_get_anonymous_denied: PASS (426ns)
+data.authz_test.test_get_user_allowed: PASS (367ns)
+data.authz_test.test_get_another_user_denied: PASS (320ns)
 --------------------------------------------------------------------------------
 PASS: 4/4
 ```
@@ -97,35 +97,96 @@ Try exercising the tests a bit more by removing the first rule in **example.rego
 $ opa test . -v
 FAILURES
 --------------------------------------------------------------------------------
-data.authz.test_post_allowed: FAIL (277.306µs)
+data.authz_test.test_post_allowed: FAIL (277.306µs)
 
-  query:1                 Enter data.authz.test_post_allowed = _
-  example_test.rego:3     | Enter data.authz.test_post_allowed
-  example_test.rego:4     | | Fail data.authz.allow with input as {"method": "POST", "path": ["users"]}
-  query:1                 | Fail data.authz.test_post_allowed = _
+  query:1                 Enter data.authz_test.test_post_allowed = _
+  example_test.rego:3     | Enter data.authz_test.test_post_allowed
+  example_test.rego:4     | | Fail data.authz_test.allow with input as {"method": "POST", "path": ["users"]}
+  query:1                 | Fail data.authz_test.test_post_allowed = _
 
 SUMMARY
 --------------------------------------------------------------------------------
-data.authz.test_post_allowed: FAIL (277.306µs)
-data.authz.test_get_anonymous_denied: PASS (124.287µs)
-data.authz.test_get_user_allowed: PASS (242.2µs)
-data.authz.test_get_another_user_denied: PASS (131.964µs)
+data.authz_test.test_post_allowed: FAIL (277.306µs)
+data.authz_test.test_get_anonymous_denied: PASS (124.287µs)
+data.authz_test.test_get_user_allowed: PASS (242.2µs)
+data.authz_test.test_get_another_user_denied: PASS (131.964µs)
 --------------------------------------------------------------------------------
 PASS: 3/4
 FAIL: 1/4
 ```
 
+## Enriched Test Report With Variable Values
+
+Sometimes, e.g. when testing rules with complex output, it can be useful to know more about the circumstances that caused a certain expression to fail a test.
+The `--var-values` flag can be used to enrich the test report with the exact expression that caused a test rule to fail, including the values of any variables or references used in the expression.
+
+Consider the following utility module:
+
+```live:example_vars:module:read_only,openable
+package authz
+
+allowed_actions(user) := [action |
+	user in data.actions[action]
+]
+```
+
+with accompanying tests:
+
+```live:example_vars/test:module:read_only
+package authz_test
+
+import data.authz
+
+test_allowed_actions_all_can_read if {
+	users := ["alice", "bob", "jane"]
+	r := ["alice", "bob"]
+	w := ["jane"]
+	p := {"read": r, "write": w}
+
+	every user in users {
+		"read" in authz.allowed_actions(user) with data.actions as p
+	}
+}
+```
+
+Exercising the tests with the `--var-values` flag:
+
+```console
+opa test . --var-values
+FAILURES
+--------------------------------------------------------------------------------
+data.authz_test.test_allowed_actions_all_can_read: FAIL (904µs)
+
+  util_test.rego:13:
+    "read" in authz.allowed_actions(user) with data.actions as p
+              |                     |                          |
+              |                     |                          {"read": ["alice", "bob"], "write": ["jane"]}
+              |                     "jane"
+              ["write"]
+
+SUMMARY
+--------------------------------------------------------------------------------
+util_test.rego:
+data.authz_test.test_allowed_actions_all_can_read: FAIL (904µs)
+--------------------------------------------------------------------------------
+FAIL: 1/1
+```
+
+The test failed because it expected users with __write__ permission to implicitly also have the __read__ permission, an expectation the function under test didn't meet.
+By including the failing expression and its local variable assignments in the test report, we make troubleshooting easier for the developer, as it's immediately apparent what assertion and combination of parameters caused the test to fail.
+
 ## Test Format
 
 Tests are expressed as standard Rego rules with a convention that the rule
-name is prefixed with `test_`.
+name is prefixed with `test_`. It's a good practice for tests to be placed in a package suffixed with `_test`, but not a requirement.
 
 ```live:example_format:module:read_only
-package mypackage
-import future.keywords
+package mypackage_test
+
+import data.mypackage
 
 test_some_descriptive_name if {
-    # test logic
+	# test logic
 }
 ```
 
@@ -153,8 +214,9 @@ by zero condition) the test result is marked as an `ERROR`. Tests prefixed with
 **pass_fail_error_test.rego**:
 
 ```live:example_results:module:read_only
-package example
-import future.keywords
+package example_test
+
+import data.example
 
 # This test will pass.
 test_ok if true
@@ -167,7 +229,7 @@ test_error if 1 / 0
 
 # This test will be skipped.
 todo_test_missing_implementation if {
-    allow with data.roles as ["not", "implemented"]
+	example.allow with data.roles as ["not", "implemented"]
 }
 ```
 
@@ -176,8 +238,8 @@ of the tests that failed or errored.
 
 ```console
 $ opa test pass_fail_error_test.rego
-data.example.test_failure: FAIL (253ns)
-data.example.test_error: ERROR (289ns)
+data.example_test.test_failure: FAIL (253ns)
+data.example_test.test_error: ERROR (289ns)
   pass_fail_error_test.rego:15: eval_builtin_error: div: divide by zero
 --------------------------------------------------------------------------------
 PASS: 1/3
@@ -200,7 +262,7 @@ opa test --format=json pass_fail_error_test.rego
       "row": 4,
       "col": 1
     },
-    "package": "data.example",
+    "package": "data.example_test",
     "name": "test_ok",
     "duration": 618515
   },
@@ -210,7 +272,7 @@ opa test --format=json pass_fail_error_test.rego
       "row": 9,
       "col": 1
     },
-    "package": "data.example",
+    "package": "data.example_test",
     "name": "test_failure",
     "fail": true,
     "duration": 322177
@@ -221,7 +283,7 @@ opa test --format=json pass_fail_error_test.rego
       "row": 14,
       "col": 1
     },
-    "package": "data.example",
+    "package": "data.example_test",
     "name": "test_error",
     "error": {
       "code": "eval_internal_error",
@@ -235,6 +297,154 @@ opa test --format=json pass_fail_error_test.rego
     "duration": 345148
   }
 ]
+```
+
+## Parameterized Tests and Data-driven Testing
+
+A test rule can define multiple test cases for evaluation. 
+Test cases are declared by adding their name(s) to the rule as variables in its head's reference, and are evaluated through regular enumeration.
+
+**example_test.rego**:
+
+```live:example_test_cases:module:read_only
+package example_test
+
+test_concat[note] if {
+	some note, tc in {
+		"empty + empty": {
+			"a": [],
+			"b": [],
+			"exp": [],
+		},
+		"empty + filled": {
+			"a": [],
+			"b": [1, 2],
+			"exp": [1, 2],
+		},
+		"filled + filled": {
+			"a": [1, 2],
+			"b": [3, 4],
+			"exp": [1, 2, 3], # Faulty expectation, this test case will fail
+		},
+	}
+
+	act := array.concat(tc.a, tc.b)
+	act == tc.exp
+}
+```
+
+```console
+$ opa test example_test.rego
+example_test.rego:
+data.example_test.test_concat: FAIL (263.375µs)
+  empty + empty: PASS
+  empty + filled: PASS
+  filled + filled: FAIL
+--------------------------------------------------------------------------------
+FAIL: 1/1
+```
+
+Just as in regular evaluation, test-case data doesn't need to be declared as inline Rego, but can be loaded from json and yaml data files:
+
+**file_example_test.rego**:
+
+```live:example_file_test_cases:module:read_only
+package example_test
+
+import data.test_cases
+
+test_concat[note] if {
+	some note, tc in test_cases
+
+	act := array.concat(tc.a, tc.b)
+	act == tc.exp
+}
+```
+
+**file_example_test.yaml**:
+
+```yaml
+test_cases:
+   empty + empty:
+      a: []
+      b: []
+      exp: []
+   empty + filled:
+      a: []
+      b: [1, 2]
+      exp: [1, 2]
+   filled + filled:
+      a: [1, 2]
+      b: [3, 4]
+      exp: [1, 2, 3] # Faulty expectation, this test case will fail
+```
+
+```console
+$ opa test file_example_test.rego file_example_test.yaml
+file_example_test.rego:
+data.example_test.test_concat: FAIL (280µs)
+  empty + empty: PASS
+  empty + filled: PASS
+  filled + filled: FAIL
+--------------------------------------------------------------------------------
+FAIL: 1/1
+```
+
+Test cases can be nested by declaring multiple test case name variables in the head reference.
+This is useful when e.g. the same set of test cases can be used for asserting the same behaviour across slightly different circumstances:
+
+**nested_example_test.rego**:
+
+```live:example_nested_test_cases:module:read_only
+package example_test
+
+test_sign_token[note][alg] if {
+	some note, tc in {
+		"claims": {
+			"claims": {"foo": "bar"},
+		},
+		"no claims": {
+			"claims": {},
+		},
+	}
+
+	some alg in [
+		"HS256",
+		"HS333", # unknown signing algorithm, this test case will fail
+		"HS512",
+	]
+
+	secret := "foobar"
+	key := base64.encode(secret)
+
+	token := io.jwt.encode_sign({
+		"typ": "JWT",
+		"alg": alg
+	}, tc.claims, {
+		"kty": "oct",
+		"k": key
+	})
+
+	[valid, _, payload] := io.jwt.decode_verify(token, {"secret": secret})
+	valid
+	payload = tc.claims
+}
+```
+
+```console
+$ opa test nested_example_test.rego
+nested_example_test.rego:
+data.example_test.test_sign_token: FAIL (1.214541ms)
+  claims: FAIL
+    HS256: PASS
+    HS333: FAIL
+    HS512: PASS
+  no claims: FAIL
+    HS256: PASS
+    HS333: FAIL
+    HS512: PASS
+--------------------------------------------------------------------------------
+FAIL: 1/1
 ```
 
 ## Data and Function Mocking
@@ -255,12 +465,11 @@ Below is a simple policy that depends on the data document.
 
 ```live:with_keyword:module:read_only,openable
 package authz
-import future.keywords
 
-allow {
-    some x in data.policies
-    x.name == "test_policy"
-    matches_role(input.role)
+allow if {
+	some x in data.policies
+	x.name == "test_policy"
+	matches_role(input.role)
 }
 
 matches_role(my_role) if input.user in data.roles[my_role]
@@ -271,16 +480,17 @@ Below is the Rego file to test the above policy.
 **authz_test.rego**:
 
 ```live:with_keyword/tests:module:read_only
-package authz
-import future.keywords
+package authz_test
+
+import data.authz
 
 policies := [{"name": "test_policy"}]
 roles := {"admin": ["alice"]}
 
 test_allow_with_data if {
-    allow with input as {"user": "alice", "role": "admin"}
-      with data.policies as policies
-      with data.roles as roles
+	authz.allow with input as {"user": "alice", "role": "admin"}
+		with data.policies as policies
+		with data.roles as roles
 }
 ```
 
@@ -288,7 +498,7 @@ To exercise the policy, run the `opa test` command.
 
 ```console
 $ opa test -v authz.rego authz_test.rego
-data.authz.test_allow_with_data: PASS (697ns)
+data.authz_test.test_allow_with_data: PASS (697ns)
 --------------------------------------------------------------------------------
 PASS: 1/1
 ```
@@ -299,7 +509,6 @@ Below is an example to replace a **rule without arguments**.
 
 ```live:with_keyword_rules:module:read_only
 package authz
-import future.keywords
 
 allow1 if allow2
 
@@ -309,17 +518,18 @@ allow2 if 2 == 1
 **authz_test.rego**:
 
 ```live:with_keyword_rules/tests:module:read_only
-package authz
-import future.keywords
+package authz_test
+
+import data.authz
 
 test_replace_rule if {
-    allow1 with allow2 as true
+	authz.allow1 with authz.allow2 as true
 }
 ```
 
 ```console
 $  opa test -v authz.rego authz_test.rego
-data.authz.test_replace_rule: PASS (328ns)
+data.authz_test.test_replace_rule: PASS (328ns)
 --------------------------------------------------------------------------------
 PASS: 1/1
 ```
@@ -330,35 +540,34 @@ Here is an example to replace a rule's **built-in function** with a user-defined
 
 ```live:with_keyword_builtins:module:read_only
 package authz
-import future.keywords
 
 import data.jwks.cert
 
 allow if {
-    [true, _, _] = io.jwt.decode_verify(input.headers["x-token"], {"cert": cert, "iss": "corp.issuer.com"})
+	[true, _, _] = io.jwt.decode_verify(input.headers["x-token"], {"cert": cert, "iss": "corp.issuer.com"})
 }
 ```
 
 **authz_test.rego**:
 
 ```live:with_keyword_builtins/tests:module:read_only
-package authz
-import future.keywords
+package authz_test
+
+import data.authz
 
 mock_decode_verify("my-jwt", _) := [true, {}, {}]
 mock_decode_verify(x, _)        := [false, {}, {}] if x != "my-jwt"
 
 test_allow if {
-    allow
-      with input.headers["x-token"] as "my-jwt"
-      with data.jwks.cert as "mock-cert"
-      with io.jwt.decode_verify as mock_decode_verify
+	authz.allow with input.headers["x-token"] as "my-jwt"
+		with data.jwks.cert as "mock-cert"
+		with io.jwt.decode_verify as mock_decode_verify
 }
 ```
 
 ```console
 $  opa test -v authz.rego authz_test.rego
-data.authz.test_allow: PASS (458.752µs)
+data.authz_test.test_allow: PASS (458.752µs)
 --------------------------------------------------------------------------------
 PASS: 1/1
 ```
@@ -367,10 +576,10 @@ In simple cases, a function can also be replaced with a value, as in
 
 ```live:with_keyword_builtins/tests/value:module:read_only
 test_allow_value if {
-    allow
-      with input.headers["x-token"] as "my-jwt"
-      with data.jwks.cert as "mock-cert"
-      with io.jwt.decode_verify as [true, {}, {}]
+	authz.allow 
+		with input.headers["x-token"] as "my-jwt"
+		with data.jwks.cert as "mock-cert"
+		with io.jwt.decode_verify as [true, {}, {}]
 }
 ```
 
@@ -384,31 +593,31 @@ function by a built-in function.
 
 ```live:with_keyword_funcs:module:read_only
 package authz
-import future.keywords
 
 replace_rule if {
-    replace(input.label)
+	replace(input.label)
 }
 
 replace(label) if {
-    label == "test_label"
+	label == "test_label"
 }
 ```
 
 **authz_test.rego**:
 
 ```live:with_keyword_funcs/tests:module:read_only
-package authz
-import future.keywords
+package authz_test
+
+import data.authz
 
 test_replace_rule if {
-    replace_rule with input.label as "does-not-matter" with replace as true
+	authz.replace_rule with input.label as "does-not-matter" with replace as true
 }
 ```
 
 ```console
 $ opa test -v authz.rego authz_test.rego
-data.authz.test_replace_rule: PASS (648.314µs)
+data.authz_test.test_replace_rule: PASS (648.314µs)
 --------------------------------------------------------------------------------
 PASS: 1/1
 ```

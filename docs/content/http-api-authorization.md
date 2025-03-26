@@ -45,17 +45,17 @@ subordinates := {"alice": [], "charlie": [], "bob": ["alice"], "betty": ["charli
 default allow := false
 
 # Allow users to get their own salaries.
-allow {
-    input.method == "GET"
-    input.path == ["finance", "salary", input.user]
+allow if {
+	input.method == "GET"
+	input.path == ["finance", "salary", input.user]
 }
 
 # Allow managers to get their subordinates' salaries.
-allow {
-    some username
-    input.method == "GET"
-    input.path = ["finance", "salary", username]
-    subordinates[input.user][_] == username
+allow if {
+	some username
+	input.method == "GET"
+	input.path = ["finance", "salary", username]
+	subordinates[input.user][_] == username
 }
 ```
 
@@ -89,6 +89,7 @@ services:
     command:
     - "run"
     - "--server"
+    - "--addr=0.0.0.0:8181"
     - "--log-format=json-pretty"
     - "--set=decision_logs.console=true"
     - "--set=services.nginx.url=http://bundle_server"
@@ -120,6 +121,12 @@ Then run `docker-compose` to pull and run the containers.
 ```shell
 docker-compose -f docker-compose.yml up
 ```
+
+{{< info >}}
+This example shows conceptually a 'manual' REST API integration with OPA.
+You might find it easier to build your OPA integration using one of the
+[language SDKs](/ecosystem/#languages) than working with the REST API directly.
+{{< /info >}}
 
 Every time the demo web server receives an HTTP request, it
 asks OPA to decide whether an HTTP API is authorized or not
@@ -210,16 +217,14 @@ this.
 package httpapi.authz
 
 # Allow HR members to get anyone's salary.
-allow {
-    input.method == "GET"
-    input.path = ["finance", "salary", _]
-    input.user == hr[_]
+allow if {
+	input.method == "GET"
+	input.path = ["finance", "salary", _]
+	input.user == hr[_]
 }
 
 # David is the only member of HR.
-hr := [
-    "david",
-]
+hr := ["david"]
 ```
 
 Build a new bundle with the new policy included.
@@ -259,37 +264,37 @@ package httpapi.authz
 default allow := false
 
 # Allow users to get their own salaries.
-allow {
-    some username
-    input.method == "GET"
-    input.path = ["finance", "salary", username]
-    token.payload.user == username
-    user_owns_token
+allow if {
+	some username
+	input.method == "GET"
+	input.path = ["finance", "salary", username]
+	token.payload.user == username
+	user_owns_token
 }
 
 # Allow managers to get their subordinate' salaries.
-allow {
-    some username
-    input.method == "GET"
-    input.path = ["finance", "salary", username]
-    token.payload.subordinates[_] == username
-    user_owns_token
+allow if {
+	some username
+	input.method == "GET"
+	input.path = ["finance", "salary", username]
+	token.payload.subordinates[_] == username
+	user_owns_token
 }
 
 # Allow HR members to get anyone's salary.
-allow {
-    input.method == "GET"
-    input.path = ["finance", "salary", _]
-    token.payload.hr == true
-    user_owns_token
+allow if {
+	input.method == "GET"
+	input.path = ["finance", "salary", _]
+	token.payload.hr == true
+	user_owns_token
 }
 
 # Ensure that the token was issued to the user supplying it.
-user_owns_token { input.user == token.payload.azp }
+user_owns_token if input.user == token.payload.azp
 
 # Helper to get the token payload.
-token := {"payload": payload} {
-    [header, payload, signature] := io.jwt.decode(input.token)
+token := {"payload": payload} if {
+	[header, payload, signature] := io.jwt.decode(input.token)
 }
 ```
 

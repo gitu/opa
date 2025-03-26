@@ -95,17 +95,12 @@ OPA can be configured to listen on specific interfaces using the `--addr` flag. 
 ```bash
 opa run --server \
   --log-level debug \
-  --addr localhost:8181 \
+  --addr 0.0.0.0:8181 \
 ```
 
-By default, OPA binds to the 0.0.0.0 interface, which allows the OPA server to be exposed to services running outside of the same machine. It's important to note that binding OPA to the 0.0.0.0 interface by itself is not inherently insecure in a trusted environment, exposing OPA to the outside world would also require opening ports and likely a similar procedure on a gateway layer above.
+By default, OPA binds to `localhost`, which prevents the OPA server from being exposed to services running outside of the same machine.
 
 In situations where OPA is not intended to be exposed to remote services, it is recommended to bind OPA to the localhost interface, which only allows connections from the same machine. If it is necessary to expose OPA to remote services, ensure to follow the security recommendations on this page, such as requiring authentication.
-
-{{< info >}}
-The `--v1-compatible` flag can be set on `opa run` to opt-in to OPA features and behaviors that will be enabled by default in a future OPA v1.0 releases. For example, if the `--v1-compatible` flag is set, OPA will listen
-for HTTP connections on `localhost:8181` by default.
-{{< /info >}}
 
 ## Authentication and Authorization
 
@@ -159,10 +154,10 @@ must be provided on startup. The authorization policy must be structured as foll
 # system.authz as follows:
 package system.authz
 
-default allow := false  # Reject requests by default.
+default allow := false # Reject requests by default.
 
-allow {
-  # Logic to authorize request goes here.
+allow if {
+	# Logic to authorize request goes here.
 }
 ```
 
@@ -265,9 +260,9 @@ identity:
 ```live:system_authz_secret:module:read_only
 package system.authz
 
-default allow := false           # Reject requests by default.
+default allow := false          # Reject requests by default.
 
-allow {                         # Allow request if...
+allow if {                      # Allow request if...
     "secret" == input.identity  # Identity is the secret root key.
 }
 ```
@@ -316,17 +311,17 @@ follows:
 package system.authz
 
 default allow := {
-    "allowed": false,
-    "reason": "unauthorized resource access"
+	"allowed": false,
+	"reason": "unauthorized resource access",
 }
 
-allow := { "allowed": true } {   # Allow request if...
-    "secret" == input.identity  # identity is the secret root key.
+allow := {"allowed": true} if { # Allow request if...
+	"secret" == input.identity # identity is the secret root key.
 }
 
-allow := { "allowed": false, "reason": reason } {
-    not input.identity
-    reason := "no identity provided"
+allow := {"allowed": false, "reason": reason} if {
+	not input.identity
+	reason := "no identity provided"
 }
 ```
 
@@ -351,14 +346,14 @@ tokens := {
     }
 }
 
-default allow := false           # Reject requests by default.
+default allow := false          # Reject requests by default.
 
-allow {                         # Allow request if...
+allow if {                      # Allow request if...
     input.identity == "secret"  # Identity is the secret root key.
 }
 
-allow {                        # Allow request if...
-    tokens[input.identity]     # Identity exists in "tokens".
+allow if {                      # Allow request if...
+    tokens[input.identity]      # Identity exists in "tokens".
 }
 ```
 
@@ -396,19 +391,19 @@ tokens := {
 
 default allow := false               # Reject requests by default.
 
-allow {                             # Allow request if...
+allow if { # Allow request if...
     some right
-    identity_rights[right]          # Rights for identity exist, and...
-    right.path == "*"               # Right.path is '*'.
+    identity_rights[right]           # Rights for identity exist, and...
+    right.path == "*"                # Right.path is '*'.
 }
 
-allow {                             # Allow request if...
+allow if { # Allow request if...
     some right
-    identity_rights[right]          # Rights for identity exist, and...
-    right.path == input.path        # Right.path matches input.path.
+    identity_rights[right]           # Rights for identity exist, and...
+    right.path == input.path         # Right.path matches input.path.
 }
 
-identity_rights[right] {             # Right is in the identity_rights set if...
+identity_rights contains right if {  # Right is in the identity_rights set if...
     token := tokens[input.identity]  # Token exists for identity, and...
     role := token.roles[_]           # Token has a role, and...
     right := rights[role]            # Role has rights defined.
@@ -506,28 +501,25 @@ information such as which paths are allowed.
 ```live:system_authz_x509:module:read_only
 package system.authz
 
-import future.keywords.if
-import future.keywords.in
-
 id_uri := input.client_certificates[0].URIs[0]
 id_string := sprintf("%s://%s%s", [id_uri.Scheme, id_uri.Host, id_uri.Path])
 
 # client_acl represents an access control list and may defined in policy or pushed into OPA as data changes.
 client_acl := {
-  "spiffe://example.com/client-1": [["v1", "data"]],
-  "spiffe://example.com/client-2": [],
+	"spiffe://example.com/client-1": [["v1", "data"]],
+	"spiffe://example.com/client-2": [],
 }
 
 default allow := {"allowed": false, "reason": "Access denied: unknown caller"}
 
-allow := { "allowed": true } if {
-  input.path in client_acl[id_string]
+allow := {"allowed": true} if {
+	input.path in client_acl[id_string]
 } else := {
-  "allowed": false,
-  "reason": sprintf("%s is not allowed to call /%s", [
-    id_string,
-    concat("/", input.path),
-  ])
+	"allowed": false,
+	"reason": sprintf("%s is not allowed to call /%s", [
+		id_string,
+		concat("/", input.path),
+	]),
 }
 ```
 
@@ -631,9 +623,9 @@ package system.authz
 default allow := false
 
 # Allow anonymous access to the default policy decision.
-allow {
-    input.method == "POST"
-    input.path == [""]
+allow if {
+	input.method == "POST"
+	input.path == [""]
 }
 ```
 

@@ -19,17 +19,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/open-policy-agent/opa/ast"
 	"github.com/open-policy-agent/opa/internal/wasm/sdk/opa"
-	"github.com/open-policy-agent/opa/rego"
-	"github.com/open-policy-agent/opa/test/cases"
-	"github.com/open-policy-agent/opa/types"
-	"github.com/open-policy-agent/opa/util"
+	"github.com/open-policy-agent/opa/v1/ast"
+	"github.com/open-policy-agent/opa/v1/rego"
+	"github.com/open-policy-agent/opa/v1/test/cases"
+	"github.com/open-policy-agent/opa/v1/types"
+	"github.com/open-policy-agent/opa/v1/util"
 )
 
 const opaRootDir = "../../../../../"
 
-var caseDir = flag.String("case-dir", filepath.Join(opaRootDir, "test/cases/testdata"), "set directory to load test cases from")
+var caseDir = flag.String("case-dir", filepath.Join(opaRootDir, "v1/test/cases/testdata/"), "set directory to load test cases from")
 var exceptionsFile = flag.String("exceptions", "./exceptions.yaml", "set file to load a list of test names to exclude")
 
 var exceptions map[string]string
@@ -57,52 +57,59 @@ func TestWasmE2E(t *testing.T) {
 
 	ctx := context.Background()
 
-	for _, tc := range cases.MustLoad(*caseDir).Sorted().Cases {
-		name := fmt.Sprintf("%s/%s", strings.TrimPrefix(tc.Filename, opaRootDir), tc.Note)
-		t.Run(name, func(t *testing.T) {
+	regoVersions := map[string]ast.RegoVersion{
+		"v0": ast.RegoV0,
+		"v1": ast.RegoV1,
+	}
+	for versionName, regoVersion := range regoVersions {
+		for _, tc := range cases.MustLoad(filepath.Join(*caseDir, versionName)).Sorted().Cases {
+			name := fmt.Sprintf("%s/%s", strings.TrimPrefix(tc.Filename, opaRootDir), tc.Note)
+			t.Run(name, func(t *testing.T) {
 
-			if shouldSkip(t, tc) {
-				t.SkipNow()
-			}
+				if shouldSkip(t, tc) {
+					t.SkipNow()
+				}
 
-			for k, v := range tc.Env {
-				t.Setenv(k, v)
-			}
+				for k, v := range tc.Env {
+					t.Setenv(k, v)
+				}
 
-			opts := []func(*rego.Rego){
-				rego.Query(tc.Query),
-			}
-			for i := range tc.Modules {
-				opts = append(opts, rego.Module(fmt.Sprintf("module-%d.rego", i), tc.Modules[i]))
-			}
-			if testing.Verbose() {
-				opts = append(opts, rego.Dump(os.Stderr))
-			}
-			cr, err := rego.New(opts...).Compile(ctx)
-			if err != nil {
-				t.Fatal(err)
-			}
-			o := opa.New().WithPolicyBytes(cr.Bytes)
-			if tc.Data != nil {
-				o = o.WithDataJSON(tc.Data)
-			}
-			o, err = o.Init()
-			if err != nil {
-				t.Fatal(err)
-			}
+				opts := []func(*rego.Rego){
+					rego.Query(tc.Query),
+					rego.SetRegoVersion(regoVersion),
+				}
+				for i := range tc.Modules {
+					opts = append(opts, rego.Module(fmt.Sprintf("module-%d.rego", i), tc.Modules[i]))
+				}
+				if testing.Verbose() {
+					opts = append(opts, rego.Dump(os.Stderr))
+				}
+				cr, err := rego.New(opts...).Compile(ctx)
+				if err != nil {
+					t.Fatal(err)
+				}
+				o := opa.New().WithPolicyBytes(cr.Bytes)
+				if tc.Data != nil {
+					o = o.WithDataJSON(tc.Data)
+				}
+				o, err = o.Init()
+				if err != nil {
+					t.Fatal(err)
+				}
 
-			var input *interface{}
+				var input *interface{}
 
-			if tc.InputTerm != nil {
-				var x interface{} = ast.MustParseTerm(*tc.InputTerm)
-				input = &x
-			} else if tc.Input != nil {
-				input = tc.Input
-			}
+				if tc.InputTerm != nil {
+					var x interface{} = ast.MustParseTerm(*tc.InputTerm)
+					input = &x
+				} else if tc.Input != nil {
+					input = tc.Input
+				}
 
-			result, err := o.Eval(ctx, opa.EvalOpts{Input: input})
-			assert(t, tc, result, err)
-		})
+				result, err := o.Eval(ctx, opa.EvalOpts{Input: input})
+				assert(t, tc, result, err)
+			})
+		}
 	}
 }
 
